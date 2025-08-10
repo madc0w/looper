@@ -95,7 +95,7 @@
 			}
 			.sample {
 				display: grid;
-				grid-template-columns: 1fr minmax(140px, 28%) 42px 42px;
+				grid-template-columns: 1fr minmax(140px, 28%) 42px 42px 42px;
 				gap: 10px;
 				align-items: center;
 				background: var(--panel);
@@ -137,6 +137,30 @@
 			.del:active {
 				transform: translateY(1px);
 			}
+			.mute,
+			.solo {
+				border: 0;
+				background: #2a2f48;
+				color: #d7e3ff;
+				border-radius: 10px;
+				width: 42px;
+				height: 42px;
+				font-size: 18px;
+				cursor: pointer;
+				transition: background 0.2s ease, transform 0.04s ease;
+			}
+			.mute:hover,
+			.solo:hover {
+				background: #353b5a;
+			}
+			.mute.active {
+				color: #ffd28b;
+				background: #3b415f;
+			}
+			.solo.active {
+				color: #a8ffcb;
+				background: #3a564b;
+			}
 			.footer {
 				margin-top: 18px;
 				color: var(--muted);
@@ -148,7 +172,7 @@
 					grid-template-columns: 1fr;
 				}
 				.sample {
-					grid-template-columns: 1fr 1fr 42px 42px;
+					grid-template-columns: 1fr 1fr 42px 42px 42px;
 				}
 			}
 			/* Oscilloscope */
@@ -163,24 +187,6 @@
 			}
 			.scope.active {
 				display: block;
-			}
-			.mute {
-				border: 0;
-				background: #2a2f48;
-				color: #d7e3ff;
-				border-radius: 10px;
-				width: 42px;
-				height: 42px;
-				font-size: 18px;
-				cursor: pointer;
-				transition: background 0.2s ease, transform 0.04s ease;
-			}
-			.mute:hover {
-				background: #353b5a;
-			}
-			.mute.active {
-				color: #ffd28b;
-				background: #3b415f;
 			}
 		</style>
 	</head>
@@ -228,7 +234,7 @@
 			let transportStartTime = null;
 			let isPlaybackSuspended = false;
 
-			/** Each loop item: { id, buffer, source, gainNode, el, userGain, muted } */
+			/** Each loop item: { id, buffer, source, gainNode, el, userGain, muted, solo } */
 			const loops = new Map();
 
 			// --- UI elements ---
@@ -311,7 +317,6 @@
 					scopeData = new Uint8Array(analyser.frequencyBinCount);
 				}
 			}
-
 			function startScope() {
 				if (!analyser) return;
 				isDrawing = true;
@@ -319,7 +324,6 @@
 				scopeCanvas.setAttribute('aria-hidden', 'false');
 				drawScope();
 			}
-
 			function stopScope() {
 				isDrawing = false;
 				if (scopeRAF) {
@@ -328,13 +332,10 @@
 				}
 				try {
 					scopeCtx.clearRect(0, 0, scopeCanvas.width, scopeCanvas.height);
-				} catch (_) {
-					/* no-op */
-				}
+				} catch (_) {}
 				scopeCanvas.classList.remove('active');
 				scopeCanvas.setAttribute('aria-hidden', 'true');
 			}
-
 			function drawScope() {
 				if (!isDrawing || !analyser) return;
 				const dpr = window.devicePixelRatio || 1;
@@ -348,15 +349,13 @@
 					scopeCanvas.height = Math.floor(cssH * dpr);
 					scopeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 				}
-
 				analyser.getByteTimeDomainData(scopeData);
-
 				scopeCtx.clearRect(0, 0, cssW, cssH);
 				scopeCtx.beginPath();
 				const mid = cssH / 2;
 				const step = cssW / scopeData.length;
 				for (let i = 0; i < scopeData.length; i++) {
-					const v = (scopeData[i] - 128) / 128; // -1..1
+					const v = (scopeData[i] - 128) / 128;
 					const x = i * step;
 					const y = mid + v * (cssH * 0.45);
 					if (i === 0) scopeCtx.moveTo(x, y);
@@ -365,14 +364,10 @@
 				scopeCtx.lineWidth = 2;
 				scopeCtx.strokeStyle = '#79ffe1';
 				scopeCtx.stroke();
-
 				scopeRAF = requestAnimationFrame(drawScope);
 			}
-
 			window.addEventListener('resize', () => {
-				if (scopeCanvas.classList.contains('active')) {
-					drawScope();
-				}
+				if (scopeCanvas.classList.contains('active')) drawScope();
 			});
 
 			async function startRecording() {
@@ -383,9 +378,7 @@
 				startScope();
 				const options = {};
 				const mt = pickMimeType();
-				if (mt) {
-					options.mimeType = mt;
-				}
+				if (mt) options.mimeType = mt;
 				try {
 					mediaRecorder = new MediaRecorder(stream, options);
 				} catch (e) {
@@ -393,22 +386,17 @@
 					setStatus('Recording is not supported in this browser.');
 					return;
 				}
-
 				recordingChunks = [];
 				mediaRecorder.ondataavailable = (e) => {
-					if (e.data && e.data.size > 0) {
-						recordingChunks.push(e.data);
-					}
+					if (e.data && e.data.size > 0) recordingChunks.push(e.data);
 				};
 				mediaRecorder.onstop = handleRecordingStop;
 				mediaRecorder.start();
-
 				recordBtn.disabled = true;
 				recordBtn.setAttribute('aria-pressed', 'true');
 				stopBtn.disabled = false;
 				setStatus('Recording… Click Stop to end.');
 			}
-
 			async function stopRecording() {
 				if (mediaRecorder && mediaRecorder.state === 'recording') {
 					stopScope();
@@ -419,22 +407,37 @@
 			}
 
 			function decodeSafely(arrayBuffer) {
-				// Some browsers require a copy of the ArrayBuffer for decodeAudioData.
 				const ab = arrayBuffer.slice(0);
 				return new Promise((resolve, reject) => {
 					audioCtx.decodeAudioData(ab, resolve, reject);
 				});
 			}
 
-			// --- Per-track gain helpers (fixes Mute + slider) ---
-			function effectiveGain(userGain, muted) {
+			// --- Solo/Mute gain helpers ---
+			function anySoloActive() {
+				for (const [, it] of loops) {
+					if (it.solo) return true;
+				}
+				return false;
+			}
+			function effectiveGain(userGain, muted, solo, anySolo) {
+				if (anySolo) return solo ? userGain : 0; // solo overrides mute
 				return muted ? 0 : userGain;
 			}
 			function applyGain(item) {
 				if (!item || !item.gainNode) return;
 				const ug = item.userGain ?? 1.0;
-				const m = item.muted ?? false;
-				item.gainNode.gain.value = effectiveGain(ug, m);
+				const anyS = anySoloActive();
+				const target = effectiveGain(ug, !!item.muted, !!item.solo, anyS);
+				item.gainNode.gain.value = target;
+			}
+			function updateAllGains() {
+				const anyS = anySoloActive();
+				for (const [, it] of loops) {
+					const ug = it.userGain ?? 1.0;
+					const target = effectiveGain(ug, !!it.muted, !!it.solo, anyS);
+					it.gainNode.gain.value = target;
+				}
 			}
 
 			// --- Loop alignment helpers ---
@@ -451,7 +454,6 @@
 				}
 				return out;
 			}
-
 			function nextGridTime(now) {
 				if (transportStartTime == null || masterLenSec == null)
 					return now + 0.05;
@@ -461,7 +463,6 @@
 				const cycles = Math.ceil((elapsed + lookahead) / masterLenSec);
 				return transportStartTime + cycles * masterLenSec;
 			}
-
 			async function resampleToContext(buffer, targetRate) {
 				if (!buffer || buffer.sampleRate === targetRate) return buffer;
 				const offline = new OfflineAudioContext(
@@ -473,8 +474,7 @@
 				src.buffer = buffer;
 				src.connect(offline.destination);
 				src.start(0);
-				const rendered = await offline.startRendering();
-				return rendered;
+				return await offline.startRendering();
 			}
 
 			function startLoopNode(buffer, when) {
@@ -485,27 +485,24 @@
 				const gainNode = audioCtx.createGain();
 				const userGain = 1.0;
 				const muted = false;
+				const solo = false;
 				gainNode.gain.value = userGain;
 				source.connect(gainNode).connect(masterGain);
 				source.start(when);
 				const el = renderSampleItem({ id, duration: buffer.duration });
-				return { id, buffer, source, gainNode, el, userGain, muted };
+				return { id, buffer, source, gainNode, el, userGain, muted, solo };
 			}
 
 			async function addLoop(buffer) {
-				// Ensure buffer uses the AudioContext sample rate
 				buffer = await resampleToContext(buffer, audioCtx.sampleRate);
-
 				if (masterLenSec == null) {
-					// First loop: establish the grid and transport
 					masterLenSec = buffer.duration;
 					buffer = padToMultiple(buffer, masterLenSec);
-					transportStartTime = audioCtx.currentTime + 0.2; // small scheduling lookahead
+					transportStartTime = audioCtx.currentTime + 0.2;
 					const node = startLoopNode(buffer, transportStartTime);
 					loops.set(node.id, node);
 					setStatus('First loop set as master. New loops will align to it.');
 				} else {
-					// Subsequent loops: extend to an integer multiple and start on next boundary
 					buffer = padToMultiple(buffer, masterLenSec);
 					const startAt = nextGridTime(audioCtx.currentTime);
 					const node = startLoopNode(buffer, startAt);
@@ -516,6 +513,9 @@
 					);
 					setStatus(`Loop added; starts at next boundary in ~${eta} ms.`);
 				}
+				// Ensure new loop respects current solo/mute state
+				updateSoloButtonsUI();
+				updateAllGains();
 			}
 
 			async function handleRecordingStop() {
@@ -539,19 +539,15 @@
 				const row = document.createElement('div');
 				row.className = 'sample';
 				row.id = id;
-
 				const name = document.createElement('div');
 				name.className = 'name';
 				name.textContent = `Sample ${id.split('-')[1]}`;
-
 				const info = document.createElement('div');
 				info.className = 'info';
 				info.textContent = `${duration.toFixed(2)} s loop`;
-
 				const labelCol = document.createElement('div');
 				labelCol.appendChild(name);
 				labelCol.appendChild(info);
-
 				const vcol = document.createElement('div');
 				vcol.className = 'vcol';
 				const slider = document.createElement('input');
@@ -561,35 +557,29 @@
 				slider.value = '100';
 				slider.setAttribute('aria-label', 'Level');
 				vcol.appendChild(slider);
-
-				const del = document.createElement('button');
-				del.className = 'del';
-				del.title = 'Delete loop';
-				del.setAttribute('aria-label', 'Delete loop');
-				del.textContent = '✕';
-
-				row.appendChild(labelCol);
-				row.appendChild(vcol);
 				const mute = document.createElement('button');
 				mute.className = 'mute';
 				mute.title = 'Mute/unmute';
 				mute.setAttribute('aria-pressed', 'false');
 				mute.textContent = '🔈';
+				const solo = document.createElement('button');
+				solo.className = 'solo';
+				solo.title = 'Solo';
+				solo.setAttribute('aria-pressed', 'false');
+				solo.textContent = '🎧';
+				const del = document.createElement('button');
+				del.className = 'del';
+				del.title = 'Delete loop';
+				del.setAttribute('aria-label', 'Delete loop');
+				del.textContent = '✕';
+				row.appendChild(labelCol);
+				row.appendChild(vcol);
 				row.appendChild(mute);
+				row.appendChild(solo);
 				row.appendChild(del);
-
-				mute.addEventListener('click', () => {
-					const item = loops.get(id);
-					if (!item) return;
-					item.muted = !item.muted;
-					mute.classList.toggle('active', item.muted);
-					mute.setAttribute('aria-pressed', String(item.muted));
-					mute.textContent = item.muted ? '🔇' : '🔈';
-					applyGain(item);
-				});
 				samplesEl.appendChild(row);
 
-				// Wire events
+				// Event wiring
 				slider.addEventListener('input', () => {
 					const item = loops.get(id);
 					if (item) {
@@ -597,52 +587,84 @@
 						applyGain(item);
 					}
 				});
-
+				mute.addEventListener('click', () => {
+					const item = loops.get(id);
+					if (!item) return;
+					item.muted = !item.muted;
+					mute.classList.toggle('active', item.muted);
+					mute.setAttribute('aria-pressed', String(item.muted));
+					mute.textContent = item.muted ? '🔇' : '🔈';
+					updateAllGains();
+				});
+				solo.addEventListener('click', () => {
+					toggleSolo(id);
+				});
 				del.addEventListener('click', () => removeLoop(id));
 				return row;
 			}
 
+			function toggleSolo(id) {
+				const current = loops.get(id);
+				if (!current) return;
+				const enable = !current.solo;
+				setSolo(enable ? id : null);
+			}
+			function setSolo(selectedId) {
+				for (const [, item] of loops) {
+					item.solo = selectedId !== null && item.id === selectedId;
+				}
+				updateSoloButtonsUI();
+				updateAllGains();
+			}
+			function updateSoloButtonsUI() {
+				for (const [, item] of loops) {
+					const row = document.getElementById(item.id);
+					if (!row) continue;
+					const btn = row.querySelector('.solo');
+					if (!btn) continue;
+					btn.classList.toggle('active', !!item.solo);
+					btn.setAttribute('aria-pressed', String(!!item.solo));
+				}
+			}
+
 			function removeLoop(id) {
 				const item = loops.get(id);
-				if (!item) {
-					return;
-				}
+				if (!item) return;
 				try {
 					item.source.stop();
-				} catch (_) {
-					/* no-op */
-				}
+				} catch (_) {}
 				try {
 					item.source.disconnect();
-				} catch (_) {
-					/* no-op */
-				}
+				} catch (_) {}
 				try {
 					item.gainNode.disconnect();
-				} catch (_) {
-					/* no-op */
-				}
+				} catch (_) {}
 				if (item.el && item.el.parentNode) {
 					item.el.parentNode.removeChild(item.el);
 				}
+				const wasSolo = !!item.solo;
 				loops.delete(id);
 				if (loops.size === 0) {
 					masterLenSec = null;
 					transportStartTime = null;
 				}
+				if (wasSolo) {
+					// clear solo if the soloed track was removed
+					setSolo(null);
+				} else {
+					updateSoloButtonsUI();
+					updateAllGains();
+				}
 				setStatus('Loop removed.');
 			}
 
 			function teardown() {
-				// Stop all sources and clear list
 				for (const [, item] of loops) {
 					try {
 						item.source.stop();
 					} catch (_) {}
 				}
 				loops.clear();
-
-				// Stop and disconnect oscilloscope
 				stopScope();
 				if (micSource) {
 					try {
@@ -656,7 +678,6 @@
 					} catch (_) {}
 					analyser = null;
 				}
-
 				if (haltBtn) {
 					haltBtn.disabled = true;
 				}
@@ -670,23 +691,19 @@
 					? '▶ Resume Playback'
 					: '⏹ Stop Playback';
 			}
-
 			if (haltBtn) {
 				haltBtn.addEventListener('click', async () => {
 					ensureAudio();
 					if (!audioCtx) return;
 					try {
 						if (!isPlaybackSuspended) {
-							// Soft-mute master immediately
 							masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.01);
-							// Also try to suspend the context (browser may ignore)
 							try {
 								await audioCtx.suspend();
 							} catch (_) {}
 							isPlaybackSuspended = true;
 							setStatus('Playback suspended.');
 						} else {
-							// Resume context first, then unmute master
 							try {
 								await audioCtx.resume();
 							} catch (_) {}
@@ -709,12 +726,9 @@
 					console.error(e);
 				}
 			});
-
 			stopBtn.addEventListener('click', () => {
 				stopRecording();
 			});
-
-			// Resume AudioContext on any user gesture if suspended.
 			['click', 'touchstart', 'keydown'].forEach((evt) => {
 				window.addEventListener(
 					evt,
@@ -726,7 +740,6 @@
 					{ once: false, passive: true }
 				);
 			});
-
 			window.addEventListener('beforeunload', teardown);
 
 			// ---------------------------
@@ -735,17 +748,16 @@
 			(async function runSelfTests() {
 				try {
 					console.groupCollapsed('%cLooper self-tests', 'color:#5eead4');
-					// Test: padToMultiple extends to the next multiple
-					const tmp1 = new OfflineAudioContext(1, 62400, 48000); // 1.3 s at 48k
+					// padToMultiple extends to the next multiple
+					const tmp1 = new OfflineAudioContext(1, 62400, 48000);
 					const buf1 = tmp1.createBuffer(1, 62400, 48000);
-					const baseSec = 0.5; // 24k frames per unit
+					const baseSec = 0.5;
 					const padded = padToMultiple(buf1, baseSec, tmp1);
 					console.assert(
 						padded.length === 72000,
 						'padToMultiple should extend to 72000 frames'
 					);
-
-					// Test: nextGridTime snaps to boundaries with lookahead
+					// nextGridTime snapping
 					transportStartTime = 100;
 					masterLenSec = 0.5;
 					let t = nextGridTime(100.1);
@@ -758,42 +770,68 @@
 						Math.abs(t - 101.0) < 1e-6,
 						'nextGridTime should return 101.0'
 					);
-
-					// Test: resampleToContext changes sampleRate
+					// resampleToContext changes sampleRate
 					const srcCtx = new OfflineAudioContext(1, 32000, 32000);
-					const srcBuf = srcCtx.createBuffer(1, 16000, 32000); // 0.5 s at 32k
+					const srcBuf = srcCtx.createBuffer(1, 16000, 32000);
 					const res = await resampleToContext(srcBuf, 48000);
 					console.assert(
 						res.sampleRate === 48000,
 						'resampleToContext should output at 48k'
 					);
-
-					// New tests: effectiveGain/applyGain + padToMultiple no-op when multiple
+					// effectiveGain and applyGain
 					console.assert(
-						effectiveGain(0.7, false) === 0.7,
-						'effectiveGain should pass through when not muted'
+						effectiveGain(0.7, false, false, false) === 0.7,
+						'pass-through gain'
 					);
 					console.assert(
-						effectiveGain(0.7, true) === 0,
-						'effectiveGain should be 0 when muted'
+						effectiveGain(0.7, true, false, false) === 0,
+						'mute wins without solo'
 					);
-					const mock = {
+					console.assert(
+						effectiveGain(0.7, false, false, true) === 0,
+						'when any solo, non-solo tracks are 0'
+					);
+					console.assert(
+						effectiveGain(0.7, true, true, true) === 0.7,
+						'solo overrides mute'
+					);
+					// Solo logic integration
+					const mockA = {
+						id: 'A',
 						gainNode: { gain: { value: 1 } },
 						userGain: 0.5,
 						muted: false,
+						solo: false,
 					};
-					applyGain(mock);
+					const mockB = {
+						id: 'B',
+						gainNode: { gain: { value: 1 } },
+						userGain: 0.3,
+						muted: false,
+						solo: false,
+					};
+					loops.set('A', mockA);
+					loops.set('B', mockB);
+					updateAllGains();
 					console.assert(
-						mock.gainNode.gain.value === 0.5,
-						'applyGain should set user gain'
+						mockA.gainNode.gain.value === 0.5 &&
+							mockB.gainNode.gain.value === 0.3,
+						'no solo: both audible'
 					);
-					mock.muted = true;
-					applyGain(mock);
+					setSolo('A');
 					console.assert(
-						mock.gainNode.gain.value === 0,
-						'applyGain should mute'
+						mockA.gainNode.gain.value === 0.5 &&
+							mockB.gainNode.gain.value === 0,
+						'solo A only'
 					);
-
+					setSolo(null);
+					console.assert(
+						mockA.gainNode.gain.value === 0.5 &&
+							mockB.gainNode.gain.value === 0.3,
+						'solo cleared'
+					);
+					loops.clear();
+					// padToMultiple no-op when already multiple
 					const tmp2 = new OfflineAudioContext(1, 48000, 48000);
 					const buf2 = tmp2.createBuffer(1, 48000, 48000);
 					const padded2 = padToMultiple(buf2, 1.0, tmp2);
@@ -805,9 +843,9 @@
 				} catch (e) {
 					console.error('Self-tests failed:', e);
 				} finally {
-					// Reset grid vars used in tests
 					masterLenSec = null;
 					transportStartTime = null;
+					loops.clear();
 				}
 			})();
 		</script>
