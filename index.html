@@ -148,6 +148,19 @@
 					grid-template-columns: 1fr 1fr 42px;
 				}
 			}
+			/* Oscilloscope */
+			.scope {
+				display: none;
+				margin-top: 10px;
+				background: #0a0d18;
+				border: 1px solid #252a40;
+				border-radius: 12px;
+				width: 100%;
+				height: 140px;
+			}
+			.scope.active {
+				display: block;
+			}
 		</style>
 	</head>
 	<body>
@@ -161,6 +174,7 @@
 					<button id="stopBtn" class="btn stop" disabled>■ Stop</button>
 				</div>
 				<div id="status" class="status">Ready.</div>
+				<canvas id="scope" class="scope" aria-hidden="true"></canvas>
 				<div id="samples" class="samples" aria-live="polite"></div>
 			</div>
 			<div class="footer">
@@ -169,6 +183,7 @@
 		</div>
 
 		<script>
+			'use strict';
 			// --- Audio + Recording state ---
 			let audioCtx = null;
 			let masterGain = null;
@@ -176,6 +191,17 @@
 			let mediaRecorder = null;
 			let recordingChunks = [];
 			let loopCounter = 0;
+
+			// Oscilloscope state
+			let micSource = null;
+			let analyser = null;
+			let scopeRAF = null;
+			let scopeData = null;
+			let isDrawing = false;
+
+			// Loop grid state
+			let masterLenSec = null;
+			let transportStartTime = null;
 
 			/** Each loop item: { id, buffer, source, gainNode, el } */
 			const loops = new Map();
@@ -185,6 +211,8 @@
 			const stopBtn = document.getElementById('stopBtn');
 			const statusEl = document.getElementById('status');
 			const samplesEl = document.getElementById('samples');
+			const scopeCanvas = document.getElementById('scope');
+			const scopeCtx = scopeCanvas.getContext('2d');
 
 			function setStatus(msg) {
 				statusEl.textContent = msg;
@@ -241,10 +269,88 @@
 				return '';
 			}
 
+			// ---- Oscilloscope helpers ----
+			function ensureAnalyser(stream) {
+				if (!audioCtx) return;
+				if (!micSource) {
+					micSource = audioCtx.createMediaStreamSource(stream);
+					analyser = audioCtx.createAnalyser();
+					analyser.fftSize = 2048;
+					analyser.smoothingTimeConstant = 0.85;
+					micSource.connect(analyser);
+					scopeData = new Uint8Array(analyser.frequencyBinCount);
+				}
+			}
+
+			function startScope() {
+				if (!analyser) return;
+				isDrawing = true;
+				scopeCanvas.classList.add('active');
+				scopeCanvas.setAttribute('aria-hidden', 'false');
+				drawScope();
+			}
+
+			function stopScope() {
+				isDrawing = false;
+				if (scopeRAF) {
+					cancelAnimationFrame(scopeRAF);
+					scopeRAF = null;
+				}
+				try {
+					scopeCtx.clearRect(0, 0, scopeCanvas.width, scopeCanvas.height);
+				} catch (_) {
+					/* no-op */
+				}
+				scopeCanvas.classList.remove('active');
+				scopeCanvas.setAttribute('aria-hidden', 'true');
+			}
+
+			function drawScope() {
+				if (!isDrawing || !analyser) return;
+				const dpr = window.devicePixelRatio || 1;
+				const cssW = scopeCanvas.clientWidth || 600;
+				const cssH = scopeCanvas.clientHeight || 140;
+				const needResize =
+					scopeCanvas.width !== Math.floor(cssW * dpr) ||
+					scopeCanvas.height !== Math.floor(cssH * dpr);
+				if (needResize) {
+					scopeCanvas.width = Math.floor(cssW * dpr);
+					scopeCanvas.height = Math.floor(cssH * dpr);
+					scopeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+				}
+
+				analyser.getByteTimeDomainData(scopeData);
+
+				scopeCtx.clearRect(0, 0, cssW, cssH);
+				scopeCtx.beginPath();
+				const mid = cssH / 2;
+				const step = cssW / scopeData.length;
+				for (let i = 0; i < scopeData.length; i++) {
+					const v = (scopeData[i] - 128) / 128; // -1..1
+					const x = i * step;
+					const y = mid + v * (cssH * 0.45);
+					if (i === 0) scopeCtx.moveTo(x, y);
+					else scopeCtx.lineTo(x, y);
+				}
+				scopeCtx.lineWidth = 2;
+				scopeCtx.strokeStyle = '#79ffe1';
+				scopeCtx.stroke();
+
+				scopeRAF = requestAnimationFrame(drawScope);
+			}
+
+			window.addEventListener('resize', () => {
+				if (scopeCanvas.classList.contains('active')) {
+					drawScope();
+				}
+			});
+
 			async function startRecording() {
 				ensureAudio();
 				await audioCtx.resume();
 				const stream = await getMicStream();
+				ensureAnalyser(stream);
+				startScope();
 				const options = {};
 				const mt = pickMimeType();
 				if (mt) {
@@ -275,27 +381,10 @@
 
 			async function stopRecording() {
 				if (mediaRecorder && mediaRecorder.state === 'recording') {
+					stopScope();
 					mediaRecorder.stop();
 					stopBtn.disabled = true;
 					setStatus('Processing…');
-				}
-			}
-
-			async function handleRecordingStop() {
-				try {
-					const blob = new Blob(recordingChunks, {
-						type: mediaRecorder.mimeType || 'audio/webm',
-					});
-					const ab = await blob.arrayBuffer();
-					const buffer = await decodeSafely(ab);
-					addLoop(buffer);
-					setStatus('Loop added. Ready to record again.');
-				} catch (err) {
-					console.error(err);
-					setStatus('Could not decode audio. Please try another recording.');
-				} finally {
-					recordBtn.disabled = false;
-					recordBtn.setAttribute('aria-pressed', 'false');
 				}
 			}
 
@@ -307,22 +396,100 @@
 				});
 			}
 
-			function addLoop(buffer) {
+			// --- Loop alignment helpers ---
+			function padToMultiple(buffer, baseSec, ctx = audioCtx) {
+				const rate = buffer.sampleRate;
+				const base = Math.max(1, Math.round(baseSec * rate));
+				const cur = buffer.length;
+				const multiple = Math.max(1, Math.ceil(cur / base));
+				const newLen = multiple * base;
+				if (newLen === cur) return buffer;
+				const out = ctx.createBuffer(buffer.numberOfChannels, newLen, rate);
+				for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+					out.getChannelData(ch).set(buffer.getChannelData(ch));
+				}
+				return out;
+			}
+
+			function nextGridTime(now) {
+				if (transportStartTime == null || masterLenSec == null)
+					return now + 0.05;
+				const lookahead = 0.05;
+				const elapsed = now - transportStartTime;
+				if (elapsed < -0.001) return transportStartTime + 0.05;
+				const cycles = Math.ceil((elapsed + lookahead) / masterLenSec);
+				return transportStartTime + cycles * masterLenSec;
+			}
+
+			async function resampleToContext(buffer, targetRate) {
+				if (!buffer || buffer.sampleRate === targetRate) return buffer;
+				const offline = new OfflineAudioContext(
+					buffer.numberOfChannels,
+					Math.ceil(buffer.duration * targetRate),
+					targetRate
+				);
+				const src = offline.createBufferSource();
+				src.buffer = buffer;
+				src.connect(offline.destination);
+				src.start(0);
+				const rendered = await offline.startRendering();
+				return rendered;
+			}
+
+			function startLoopNode(buffer, when) {
 				const id = `loop-${++loopCounter}`;
 				const source = audioCtx.createBufferSource();
 				source.buffer = buffer;
 				source.loop = true;
-
 				const gainNode = audioCtx.createGain();
 				gainNode.gain.value = 1.0;
-
 				source.connect(gainNode).connect(masterGain);
-				const startAt = Math.ceil(audioCtx.currentTime * 1000) / 1000; // small alignment
-				source.start(startAt);
-
+				source.start(when);
 				const el = renderSampleItem({ id, duration: buffer.duration });
+				return { id, buffer, source, gainNode, el };
+			}
 
-				loops.set(id, { id, buffer, source, gainNode, el });
+			async function addLoop(buffer) {
+				// Ensure buffer uses the AudioContext sample rate
+				buffer = await resampleToContext(buffer, audioCtx.sampleRate);
+
+				if (masterLenSec == null) {
+					// First loop: establish the grid and transport
+					masterLenSec = buffer.duration;
+					buffer = padToMultiple(buffer, masterLenSec);
+					transportStartTime = audioCtx.currentTime + 0.2; // small scheduling lookahead
+					const node = startLoopNode(buffer, transportStartTime);
+					loops.set(node.id, node);
+					setStatus('First loop set as master. New loops will align to it.');
+				} else {
+					// Subsequent loops: extend to an integer multiple and start on next boundary
+					buffer = padToMultiple(buffer, masterLenSec);
+					const startAt = nextGridTime(audioCtx.currentTime);
+					const node = startLoopNode(buffer, startAt);
+					loops.set(node.id, node);
+					const eta = Math.max(
+						0,
+						Math.round((startAt - audioCtx.currentTime) * 1000)
+					);
+					setStatus(`Loop added; starts at next boundary in ~${eta} ms.`);
+				}
+			}
+
+			async function handleRecordingStop() {
+				try {
+					const blob = new Blob(recordingChunks, {
+						type: mediaRecorder.mimeType || 'audio/webm',
+					});
+					const ab = await blob.arrayBuffer();
+					const buffer = await decodeSafely(ab);
+					await addLoop(buffer);
+				} catch (err) {
+					console.error(err);
+					setStatus('Could not decode audio. Please try another recording.');
+				} finally {
+					recordBtn.disabled = false;
+					recordBtn.setAttribute('aria-pressed', 'false');
+				}
 			}
 
 			function renderSampleItem({ id, duration }) {
@@ -382,24 +549,36 @@
 				}
 				try {
 					item.source.stop();
-				} catch (_) {}
+				} catch (_) {
+					/* no-op */
+				}
 				try {
 					item.source.disconnect();
-				} catch (_) {}
+				} catch (_) {
+					/* no-op */
+				}
 				try {
 					item.gainNode.disconnect();
-				} catch (_) {}
+				} catch (_) {
+					/* no-op */
+				}
 				if (item.el && item.el.parentNode) {
 					item.el.parentNode.removeChild(item.el);
 				}
 				loops.delete(id);
+				if (loops.size === 0) {
+					masterLenSec = null;
+					transportStartTime = null;
+				}
 				setStatus('Loop removed.');
 			}
 
 			function teardown() {
 				if (mediaStream) {
 					for (const t of mediaStream.getTracks()) {
-						t.stop();
+						try {
+							t.stop();
+						} catch (_) {}
 					}
 				}
 				for (const [, item] of loops) {
@@ -408,13 +587,29 @@
 					} catch (_) {}
 				}
 				loops.clear();
+				// Stop and disconnect oscilloscope
+				stopScope();
+				if (micSource) {
+					try {
+						micSource.disconnect();
+					} catch (_) {}
+					micSource = null;
+				}
+				if (analyser) {
+					try {
+						analyser.disconnect();
+					} catch (_) {}
+					analyser = null;
+				}
 			}
 
 			// --- Hook up UI ---
 			recordBtn.addEventListener('click', async () => {
 				try {
 					await startRecording();
-				} catch (_) {}
+				} catch (e) {
+					console.error(e);
+				}
 			});
 
 			stopBtn.addEventListener('click', () => {
@@ -435,6 +630,54 @@
 			});
 
 			window.addEventListener('beforeunload', teardown);
+
+			// ---------------------------
+			// Minimal self-tests (console)
+			// ---------------------------
+			(async function runSelfTests() {
+				try {
+					console.groupCollapsed('%cLooper self-tests', 'color:#5eead4');
+					// Test: padToMultiple extends to the next multiple
+					const tmp1 = new OfflineAudioContext(1, 62400, 48000); // 1.3 s at 48k
+					const buf1 = tmp1.createBuffer(1, 62400, 48000);
+					const baseSec = 0.5; // 24k frames per unit
+					const padded = padToMultiple(buf1, baseSec, tmp1);
+					console.assert(
+						padded.length === 72000,
+						'padToMultiple should extend to 72000 frames'
+					);
+
+					// Test: nextGridTime snaps to boundaries with lookahead
+					transportStartTime = 100;
+					masterLenSec = 0.5;
+					let t = nextGridTime(100.1);
+					console.assert(
+						Math.abs(t - 100.5) < 1e-6,
+						'nextGridTime should return 100.5'
+					);
+					t = nextGridTime(100.51);
+					console.assert(
+						Math.abs(t - 101.0) < 1e-6,
+						'nextGridTime should return 101.0'
+					);
+
+					// Test: resampleToContext changes sampleRate
+					const srcCtx = new OfflineAudioContext(1, 32000, 32000);
+					const srcBuf = srcCtx.createBuffer(1, 16000, 32000); // 0.5 s at 32k
+					const res = await resampleToContext(srcBuf, 48000);
+					console.assert(
+						res.sampleRate === 48000,
+						'resampleToContext should output at 48k'
+					);
+					console.groupEnd();
+				} catch (e) {
+					console.error('Self-tests failed:', e);
+				} finally {
+					// Reset grid vars used in tests
+					masterLenSec = null;
+					transportStartTime = null;
+				}
+			})();
 		</script>
 	</body>
 </html>
