@@ -796,20 +796,35 @@
 				toggleRecording();
 			});
 
-			// Space bar toggles record/stop unless typing in a control
+			// Space = record toggle, Shift+Space = playback toggle.
+			// Do nothing when focus is on a form control or button.
+			function isInteractive(el) {
+				if (!el) return false;
+				const tag = el.tagName ? el.tagName.toLowerCase() : '';
+				return (
+					el.isContentEditable ||
+					tag === 'input' ||
+					tag === 'textarea' ||
+					tag === 'select' ||
+					tag === 'button' ||
+					el.getAttribute('role') === 'button'
+				);
+			}
+
 			window.addEventListener('keydown', (e) => {
-				const target = e.target;
-				const tag =
-					target && target.tagName ? target.tagName.toLowerCase() : '';
-				const editable =
-					target &&
-					(target.isContentEditable ||
-						tag === 'input' ||
-						tag === 'textarea' ||
-						tag === 'select' ||
-						tag === 'button');
-				if ((e.code === 'Space' || e.key === ' ') && !editable) {
-					e.preventDefault();
+				const isSpace = e.code === 'Space' || e.key === ' ';
+				if (!isSpace) return;
+
+				const el = document.activeElement;
+				if (isInteractive(el)) return; // let the focused control handle space
+
+				e.preventDefault(); // avoid page scroll / default button activation
+
+				if (e.shiftKey) {
+					// Shift+Space => toggle playback (halt/resume)
+					if (haltBtn && !haltBtn.disabled) haltBtn.click();
+				} else {
+					// Space => toggle recording
 					toggleRecording();
 				}
 			});
