@@ -48,7 +48,7 @@
 			}
 			.controls {
 				display: grid;
-				grid-template-columns: 1fr 1fr 1fr;
+				grid-template-columns: 1fr 1fr;
 				gap: 12px;
 				align-items: center;
 			}
@@ -93,8 +93,6 @@
 				display: grid;
 				gap: 10px;
 			}
-
-			/* +1 column for the Play button (▶) */
 			.sample {
 				display: grid;
 				grid-template-columns: 1fr minmax(140px, 28%) 42px 42px 42px 42px;
@@ -122,7 +120,6 @@
 				width: 100%;
 				accent-color: var(--accent);
 			}
-
 			.del,
 			.mute,
 			.solo,
@@ -158,14 +155,7 @@
 			}
 			.solo.active {
 				color: #a8ffcb;
-				background: #3b415f;
-			}
-
-			.footer {
-				margin-top: 18px;
-				color: var(--muted);
-				font-size: 12px;
-				text-align: center;
+				background: #3a564b;
 			}
 			@media (max-width: 600px) {
 				.controls {
@@ -175,8 +165,6 @@
 					grid-template-columns: 1fr 1fr 42px 42px 42px 42px;
 				}
 			}
-
-			/* Oscilloscope */
 			.scope {
 				display: none;
 				margin-top: 10px;
@@ -189,6 +177,12 @@
 			.scope.active {
 				display: block;
 			}
+			.footer {
+				margin-top: 18px;
+				color: var(--muted);
+				font-size: 12px;
+				text-align: center;
+			}
 		</style>
 	</head>
 	<body>
@@ -196,10 +190,9 @@
 			<h1>Simple Audio Looper</h1>
 			<div class="panel">
 				<div class="controls">
-					<button id="recordBtn" class="btn record" aria-pressed="false">
+					<button id="recToggleBtn" class="btn record" aria-pressed="false">
 						● Record
 					</button>
-					<button id="stopBtn" class="btn stop" disabled>■ Stop</button>
 					<button id="haltBtn" class="btn halt" disabled>
 						⏹ Stop Playback
 					</button>
@@ -216,40 +209,39 @@
 		<script>
 			'use strict';
 			// --- Audio + Recording state ---
-			let audioCtx = null;
-			let masterGain = null;
-			let mediaStream = null;
-			let mediaRecorder = null;
-			let recordingChunks = [];
-			let loopCounter = 0;
+			let audioCtx = null,
+				masterGain = null,
+				mediaStream = null,
+				mediaRecorder = null,
+				recordingChunks = [],
+				loopCounter = 0;
 
-			// Oscilloscope state
-			let micSource = null;
-			let analyser = null;
-			let scopeRAF = null;
-			let scopeData = null;
-			let isDrawing = false;
+			// Oscilloscope
+			let micSource = null,
+				analyser = null,
+				scopeRAF = null,
+				scopeData = null,
+				isDrawing = false;
 
 			// Loop grid state
-			let masterLenSec = null;
-			let transportStartTime = null;
-			let isPlaybackSuspended = false;
+			let masterLenSec = null,
+				transportStartTime = null,
+				isPlaybackSuspended = false;
 
 			/** Each loop item: { id, buffer, source, gainNode, el, userGain, muted, solo, resyncTimer? } */
 			const loops = new Map();
 
 			// --- UI elements ---
-			const recordBtn = document.getElementById('recordBtn');
-			const stopBtn = document.getElementById('stopBtn');
+			const recToggleBtn = document.getElementById('recToggleBtn');
 			const haltBtn = document.getElementById('haltBtn');
 			const statusEl = document.getElementById('status');
 			const samplesEl = document.getElementById('samples');
 			const scopeCanvas = document.getElementById('scope');
 			const scopeCtx = scopeCanvas.getContext('2d');
 
-			function setStatus(msg) {
-				statusEl.textContent = msg;
-			}
+			const setStatus = (m) => {
+				statusEl.textContent = m;
+			};
 
 			function ensureAudio() {
 				if (!audioCtx) {
@@ -297,9 +289,8 @@
 						window.MediaRecorder &&
 						MediaRecorder.isTypeSupported &&
 						MediaRecorder.isTypeSupported(t)
-					) {
+					)
 						return t;
-					}
 				}
 				return '';
 			}
@@ -337,9 +328,9 @@
 			}
 			function drawScope() {
 				if (!isDrawing || !analyser) return;
-				const dpr = window.devicePixelRatio || 1;
-				const cssW = scopeCanvas.clientWidth || 600;
-				const cssH = scopeCanvas.clientHeight || 140;
+				const dpr = window.devicePixelRatio || 1,
+					cssW = scopeCanvas.clientWidth || 600,
+					cssH = scopeCanvas.clientHeight || 140;
 				const needResize =
 					scopeCanvas.width !== Math.floor(cssW * dpr) ||
 					scopeCanvas.height !== Math.floor(cssH * dpr);
@@ -351,8 +342,8 @@
 				analyser.getByteTimeDomainData(scopeData);
 				scopeCtx.clearRect(0, 0, cssW, cssH);
 				scopeCtx.beginPath();
-				const mid = cssH / 2;
-				const step = cssW / scopeData.length;
+				const mid = cssH / 2,
+					step = cssW / scopeData.length;
 				for (let i = 0; i < scopeData.length; i++) {
 					const v = (scopeData[i] - 128) / 128;
 					const x = i * step;
@@ -369,14 +360,29 @@
 				if (scopeCanvas.classList.contains('active')) drawScope();
 			});
 
+			// --- Recording (toggle) ---
+			function updateRecToggleUI(recording) {
+				if (recording) {
+					recToggleBtn.classList.remove('record');
+					recToggleBtn.classList.add('stop');
+					recToggleBtn.textContent = '■ Stop';
+					recToggleBtn.setAttribute('aria-pressed', 'true');
+				} else {
+					recToggleBtn.classList.remove('stop');
+					recToggleBtn.classList.add('record');
+					recToggleBtn.textContent = '● Record';
+					recToggleBtn.setAttribute('aria-pressed', 'false');
+				}
+			}
+
 			async function startRecording() {
 				ensureAudio();
 				await audioCtx.resume();
 				const stream = await getMicStream();
 				ensureAnalyser(stream);
 				startScope();
-				const options = {};
-				const mt = pickMimeType();
+				const options = {},
+					mt = pickMimeType();
 				if (mt) options.mimeType = mt;
 				try {
 					mediaRecorder = new MediaRecorder(stream, options);
@@ -391,17 +397,23 @@
 				};
 				mediaRecorder.onstop = handleRecordingStop;
 				mediaRecorder.start();
-				recordBtn.disabled = true;
-				recordBtn.setAttribute('aria-pressed', 'true');
-				stopBtn.disabled = false;
-				setStatus('Recording… Click Stop to end.');
+				updateRecToggleUI(true);
+				setStatus('Recording… Press again to stop.');
 			}
+
 			async function stopRecording() {
 				if (mediaRecorder && mediaRecorder.state === 'recording') {
 					stopScope();
 					mediaRecorder.stop();
-					stopBtn.disabled = true;
 					setStatus('Processing…');
+				}
+			}
+
+			async function toggleRecording() {
+				if (mediaRecorder && mediaRecorder.state === 'recording') {
+					await stopRecording();
+				} else {
+					await startRecording();
 				}
 			}
 
@@ -420,7 +432,7 @@
 				return false;
 			}
 			function effectiveGain(userGain, muted, solo, anySolo) {
-				if (anySolo) return solo ? userGain : 0; // solo overrides mute
+				if (anySolo) return solo ? userGain : 0;
 				return muted ? 0 : userGain;
 			}
 			function applyGain(item) {
@@ -441,11 +453,11 @@
 
 			// --- Loop alignment helpers ---
 			function padToMultiple(buffer, baseSec, ctx = audioCtx) {
-				const rate = buffer.sampleRate;
-				const base = Math.max(1, Math.round(baseSec * rate));
-				const cur = buffer.length;
-				const multiple = Math.max(1, Math.ceil(cur / base));
-				const newLen = multiple * base;
+				const rate = buffer.sampleRate,
+					base = Math.max(1, Math.round(baseSec * rate)),
+					cur = buffer.length;
+				const multiple = Math.max(1, Math.ceil(cur / base)),
+					newLen = multiple * base;
 				if (newLen === cur) return buffer;
 				const out = ctx.createBuffer(buffer.numberOfChannels, newLen, rate);
 				for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
@@ -456,8 +468,8 @@
 			function nextGridTime(now) {
 				if (transportStartTime == null || masterLenSec == null)
 					return now + 0.05;
-				const lookahead = 0.05;
-				const elapsed = now - transportStartTime;
+				const lookahead = 0.05,
+					elapsed = now - transportStartTime;
 				if (elapsed < -0.001) return transportStartTime + 0.05;
 				const cycles = Math.ceil((elapsed + lookahead) / masterLenSec);
 				return transportStartTime + cycles * masterLenSec;
@@ -481,16 +493,13 @@
 				const source = audioCtx.createBufferSource();
 				source.buffer = buffer;
 				source.loop = true;
-
 				const gainNode = audioCtx.createGain();
 				const userGain = 1.0;
 				const muted = false;
 				const solo = false;
-
 				gainNode.gain.value = userGain;
 				source.connect(gainNode).connect(masterGain);
 				source.start(when);
-
 				const el = renderSampleItem({ id, duration: buffer.duration });
 				return {
 					id,
@@ -525,7 +534,6 @@
 					);
 					setStatus(`Loop added; starts at next boundary in ~${eta} ms.`);
 				}
-				// Ensure new loop respects current solo/mute state
 				updateSoloButtonsUI();
 				updateAllGains();
 			}
@@ -542,17 +550,14 @@
 					console.error(err);
 					setStatus('Could not decode audio. Please try another recording.');
 				} finally {
-					recordBtn.disabled = false;
-					recordBtn.setAttribute('aria-pressed', 'false');
+					updateRecToggleUI(false);
 				}
 			}
 
-			// === Play (restart & resnap) ===
+			// === Play (restart now, re-lock at boundary) ===
 			function playRestart(id) {
 				const item = loops.get(id);
 				if (!item || !audioCtx) return;
-
-				// Cancel any previously scheduled resync
 				if (item.resyncTimer) {
 					clearTimeout(item.resyncTimer);
 					item.resyncTimer = null;
@@ -561,7 +566,6 @@
 				const now = audioCtx.currentTime;
 				const boundary = nextGridTime(now);
 
-				// Stop the current aligned source immediately and start a fresh one now
 				try {
 					item.source.stop();
 				} catch (_) {}
@@ -571,7 +575,6 @@
 				immediate.connect(item.gainNode);
 				immediate.start(now);
 
-				// Schedule a re-lock at the next grid boundary
 				const msUntil = Math.max(
 					0,
 					Math.round((boundary - audioCtx.currentTime) * 1000)
@@ -585,10 +588,11 @@
 					try {
 						immediate.stop(boundary);
 					} catch (_) {}
-					item.source = aligned; // hand-off
+					item.source = aligned;
 					item.resyncTimer = null;
-				}, Math.max(0, msUntil - 20)); // create slightly before boundary
-				item.source = immediate; // current active source
+				}, Math.max(0, msUntil - 20));
+
+				item.source = immediate;
 			}
 
 			function renderSampleItem({ id, duration }) {
@@ -599,11 +603,9 @@
 				const name = document.createElement('div');
 				name.className = 'name';
 				name.textContent = `Sample ${id.split('-')[1]}`;
-
 				const info = document.createElement('div');
 				info.className = 'info';
 				info.textContent = `${duration.toFixed(2)} s loop`;
-
 				const labelCol = document.createElement('div');
 				labelCol.appendChild(name);
 				labelCol.appendChild(info);
@@ -623,19 +625,16 @@
 				play.title = 'Play now (restart, then resync at boundary)';
 				play.setAttribute('aria-label', 'Play now');
 				play.textContent = '▶';
-
 				const mute = document.createElement('button');
 				mute.className = 'mute';
 				mute.title = 'Mute/unmute';
 				mute.setAttribute('aria-pressed', 'false');
 				mute.textContent = '🔈';
-
 				const solo = document.createElement('button');
 				solo.className = 'solo';
 				solo.title = 'Solo';
 				solo.setAttribute('aria-pressed', 'false');
 				solo.textContent = '🎧';
-
 				const del = document.createElement('button');
 				del.className = 'del';
 				del.title = 'Delete loop';
@@ -650,7 +649,6 @@
 				row.appendChild(del);
 				samplesEl.appendChild(row);
 
-				// Event wiring
 				slider.addEventListener('input', () => {
 					const item = loops.get(id);
 					if (item) {
@@ -794,16 +792,28 @@
 			}
 
 			// --- Hook up UI ---
-			recordBtn.addEventListener('click', async () => {
-				try {
-					await startRecording();
-				} catch (e) {
-					console.error(e);
+			recToggleBtn.addEventListener('click', () => {
+				toggleRecording();
+			});
+
+			// Space bar toggles record/stop unless typing in a control
+			window.addEventListener('keydown', (e) => {
+				const target = e.target;
+				const tag =
+					target && target.tagName ? target.tagName.toLowerCase() : '';
+				const editable =
+					target &&
+					(target.isContentEditable ||
+						tag === 'input' ||
+						tag === 'textarea' ||
+						tag === 'select' ||
+						tag === 'button');
+				if ((e.code === 'Space' || e.key === ' ') && !editable) {
+					e.preventDefault();
+					toggleRecording();
 				}
 			});
-			stopBtn.addEventListener('click', () => {
-				stopRecording();
-			});
+
 			['click', 'touchstart', 'keydown'].forEach((evt) => {
 				window.addEventListener(
 					evt,
@@ -823,17 +833,14 @@
 			(async function runSelfTests() {
 				try {
 					console.groupCollapsed('%cLooper self-tests', 'color:#5eead4');
-					// padToMultiple extends to the next multiple
 					const tmp1 = new OfflineAudioContext(1, 62400, 48000);
 					const buf1 = tmp1.createBuffer(1, 62400, 48000);
-					const baseSec = 0.5;
-					const padded = padToMultiple(buf1, baseSec, tmp1);
+					const padded = padToMultiple(buf1, 0.5, tmp1);
 					console.assert(
 						padded.length === 72000,
 						'padToMultiple should extend to 72000 frames'
 					);
 
-					// nextGridTime snapping
 					transportStartTime = 100;
 					masterLenSec = 0.5;
 					let t = nextGridTime(100.1);
@@ -847,7 +854,6 @@
 						'nextGridTime should return 101.0'
 					);
 
-					// resampleToContext changes sampleRate
 					const srcCtx = new OfflineAudioContext(1, 32000, 32000);
 					const srcBuf = srcCtx.createBuffer(1, 16000, 32000);
 					const res = await resampleToContext(srcBuf, 48000);
@@ -856,7 +862,6 @@
 						'resampleToContext should output at 48k'
 					);
 
-					// gain logic
 					console.assert(
 						effectiveGain(0.7, false, false, false) === 0.7,
 						'pass-through gain'
@@ -873,13 +878,6 @@
 						effectiveGain(0.7, true, true, true) === 0.7,
 						'solo overrides mute'
 					);
-
-					// quick sanity: boundary should be >= now
-					const now = 5;
-					transportStartTime = 0;
-					masterLenSec = 2;
-					const nb = nextGridTime(now);
-					console.assert(nb >= now, 'boundary must be in the future');
 
 					console.groupEnd();
 				} catch (e) {
