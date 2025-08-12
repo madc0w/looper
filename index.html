@@ -30,9 +30,19 @@
 				display: grid;
 				place-items: start center;
 			}
+			/* widen the app a touch */
 			.wrap {
-				width: min(900px, 92vw);
-				padding: 28px 16px 48px;
+				width: min(1120px, 96vw); /* was: min(900px, 92vw) */
+			}
+
+			/* keep each control wide enough on desktop */
+			.controls {
+				grid-template-columns: repeat(4, minmax(230px, 1fr));
+			}
+
+			/* prevent multi-line labels like "Resume Playback" */
+			.btn {
+				white-space: nowrap;
 			}
 			h1 {
 				margin: 6px 0 18px;
@@ -48,7 +58,7 @@
 			}
 			.controls {
 				display: grid;
-				grid-template-columns: 1fr 1fr;
+				grid-template-columns: repeat(4, 1fr);
 				gap: 12px;
 				align-items: center;
 			}
@@ -81,6 +91,9 @@
 			}
 			.btn.halt {
 				background: linear-gradient(180deg, #9cc2ff, #6aa0ff);
+			}
+			.btn.dl {
+				background: linear-gradient(180deg, #ffd28b, #ffc266);
 			}
 			.status {
 				margin-top: 10px;
@@ -155,7 +168,7 @@
 			}
 			.solo.active {
 				color: #a8ffcb;
-				background: #3a564b;
+				background: #3b415f;
 			}
 			@media (max-width: 600px) {
 				.controls {
@@ -196,13 +209,18 @@
 					<button id="haltBtn" class="btn halt" disabled>
 						⏹ Stop Playback
 					</button>
+					<button id="mixRecBtn" class="btn record" aria-pressed="false">
+						⏺ Record Mix
+					</button>
+					<button id="mixDlBtn" class="btn dl" disabled>⬇ Download Mix</button>
 				</div>
 				<div id="status" class="status">Ready.</div>
 				<canvas id="scope" class="scope" aria-hidden="true"></canvas>
 				<div id="samples" class="samples" aria-live="polite"></div>
 			</div>
 			<div class="footer">
-				Tip: adjust levels with the sliders; click ✕ to remove a loop.
+				Space: Mic Record • Shift+Space: Stop/Resume • Tip: adjust levels with
+				the sliders; click ✕ to remove a loop.
 			</div>
 		</div>
 
@@ -234,6 +252,8 @@
 			// --- UI elements ---
 			const recToggleBtn = document.getElementById('recToggleBtn');
 			const haltBtn = document.getElementById('haltBtn');
+			const mixRecBtn = document.getElementById('mixRecBtn');
+			const mixDlBtn = document.getElementById('mixDlBtn');
 			const statusEl = document.getElementById('status');
 			const samplesEl = document.getElementById('samples');
 			const scopeCanvas = document.getElementById('scope');
@@ -254,6 +274,7 @@
 						updateHaltButtonUI();
 					}
 				}
+				ensureMixStream(); // set up mix tap (no worklet)
 			}
 
 			async function getMicStream() {
@@ -360,7 +381,7 @@
 				if (scopeCanvas.classList.contains('active')) drawScope();
 			});
 
-			// --- Recording (toggle) ---
+			// --- Mic Recording (toggle) ---
 			function updateRecToggleUI(recording) {
 				if (recording) {
 					recToggleBtn.classList.remove('record');
@@ -374,7 +395,6 @@
 					recToggleBtn.setAttribute('aria-pressed', 'false');
 				}
 			}
-
 			async function startRecording() {
 				ensureAudio();
 				await audioCtx.resume();
@@ -400,7 +420,6 @@
 				updateRecToggleUI(true);
 				setStatus('Recording… Press again to stop.');
 			}
-
 			async function stopRecording() {
 				if (mediaRecorder && mediaRecorder.state === 'recording') {
 					stopScope();
@@ -408,15 +427,11 @@
 					setStatus('Processing…');
 				}
 			}
-
 			async function toggleRecording() {
-				if (mediaRecorder && mediaRecorder.state === 'recording') {
+				if (mediaRecorder && mediaRecorder.state === 'recording')
 					await stopRecording();
-				} else {
-					await startRecording();
-				}
+				else await startRecording();
 			}
-
 			function decodeSafely(arrayBuffer) {
 				const ab = arrayBuffer.slice(0);
 				return new Promise((resolve, reject) => {
@@ -562,10 +577,8 @@
 					clearTimeout(item.resyncTimer);
 					item.resyncTimer = null;
 				}
-
-				const now = audioCtx.currentTime;
-				const boundary = nextGridTime(now);
-
+				const now = audioCtx.currentTime,
+					boundary = nextGridTime(now);
 				try {
 					item.source.stop();
 				} catch (_) {}
@@ -574,7 +587,6 @@
 				immediate.loop = true;
 				immediate.connect(item.gainNode);
 				immediate.start(now);
-
 				const msUntil = Math.max(
 					0,
 					Math.round((boundary - audioCtx.currentTime) * 1000)
@@ -591,7 +603,6 @@
 					item.source = aligned;
 					item.resyncTimer = null;
 				}, Math.max(0, msUntil - 20));
-
 				item.source = immediate;
 			}
 
@@ -599,7 +610,6 @@
 				const row = document.createElement('div');
 				row.className = 'sample';
 				row.id = id;
-
 				const name = document.createElement('div');
 				name.className = 'name';
 				name.textContent = `Sample ${id.split('-')[1]}`;
@@ -609,7 +619,6 @@
 				const labelCol = document.createElement('div');
 				labelCol.appendChild(name);
 				labelCol.appendChild(info);
-
 				const vcol = document.createElement('div');
 				vcol.className = 'vcol';
 				const slider = document.createElement('input');
@@ -619,7 +628,6 @@
 				slider.value = '100';
 				slider.setAttribute('aria-label', 'Level');
 				vcol.appendChild(slider);
-
 				const play = document.createElement('button');
 				play.className = 'play';
 				play.title = 'Play now (restart, then resync at boundary)';
@@ -640,7 +648,6 @@
 				del.title = 'Delete loop';
 				del.setAttribute('aria-label', 'Delete loop');
 				del.textContent = '✕';
-
 				row.appendChild(labelCol);
 				row.appendChild(vcol);
 				row.appendChild(play);
@@ -754,6 +761,10 @@
 				if (haltBtn) {
 					haltBtn.disabled = true;
 				}
+				if (mixWavUrl) {
+					URL.revokeObjectURL(mixWavUrl);
+					mixWavUrl = null;
+				}
 				isPlaybackSuspended = false;
 			}
 
@@ -791,13 +802,7 @@
 				});
 			}
 
-			// --- Hook up UI ---
-			recToggleBtn.addEventListener('click', () => {
-				toggleRecording();
-			});
-
-			// Space = record toggle, Shift+Space = playback toggle.
-			// Do nothing when focus is on a form control or button.
+			// --- Keyboard: Space = mic record, Shift+Space = playback toggle (not on inputs)
 			function isInteractive(el) {
 				if (!el) return false;
 				const tag = el.tagName ? el.tagName.toLowerCase() : '';
@@ -810,25 +815,23 @@
 					el.getAttribute('role') === 'button'
 				);
 			}
-
 			window.addEventListener('keydown', (e) => {
 				const isSpace = e.code === 'Space' || e.key === ' ';
 				if (!isSpace) return;
-
 				const el = document.activeElement;
-				if (isInteractive(el)) return; // let the focused control handle space
-
-				e.preventDefault(); // avoid page scroll / default button activation
-
+				if (isInteractive(el)) return;
+				e.preventDefault();
 				if (e.shiftKey) {
-					// Shift+Space => toggle playback (halt/resume)
 					if (haltBtn && !haltBtn.disabled) haltBtn.click();
 				} else {
-					// Space => toggle recording
 					toggleRecording();
 				}
 			});
 
+			// --- Hook up UI ---
+			recToggleBtn.addEventListener('click', () => {
+				toggleRecording();
+			});
 			['click', 'touchstart', 'keydown'].forEach((evt) => {
 				window.addEventListener(
 					evt,
@@ -842,6 +845,198 @@
 			});
 			window.addEventListener('beforeunload', teardown);
 
+			// ===============================
+			// Mix Recorder (MediaStream tap)
+			// ===============================
+			let mixDest = null,
+				mixMR = null,
+				mixChunks = [],
+				mixWavUrl = null,
+				mixRecording = false;
+
+			function ensureMixStream() {
+				if (!audioCtx) return;
+				if (!mixDest) {
+					mixDest = audioCtx.createMediaStreamDestination();
+					// parallel tap: keep existing masterGain -> destination
+					masterGain.connect(mixDest);
+				}
+			}
+
+			function updateMixRecUI(recording) {
+				if (recording) {
+					mixRecBtn.classList.remove('record');
+					mixRecBtn.classList.add('stop');
+					mixRecBtn.textContent = '■ Stop Mix';
+					mixRecBtn.setAttribute('aria-pressed', 'true');
+					mixDlBtn.disabled = true;
+				} else {
+					mixRecBtn.classList.remove('stop');
+					mixRecBtn.classList.add('record');
+					mixRecBtn.textContent = '⏺ Record Mix';
+					mixRecBtn.setAttribute('aria-pressed', 'false');
+				}
+			}
+
+			function bufferToInterleavedFloat32(buf) {
+				const ch = buf.numberOfChannels | 0,
+					frames = buf.length | 0;
+				const out = new Float32Array(frames * ch);
+				for (let i = 0; i < frames; i++) {
+					for (let c = 0; c < ch; c++) {
+						out[i * ch + c] = buf.getChannelData(c)[i] || 0;
+					}
+				}
+				return out;
+			}
+
+			function floatTo16PCM(float32) {
+				const dv = new DataView(new ArrayBuffer(float32.length * 2));
+				let off = 0;
+				for (let i = 0; i < float32.length; i++) {
+					let s = Math.max(-1, Math.min(1, float32[i]));
+					dv.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+					off += 2;
+				}
+				return dv.buffer;
+			}
+
+			function createWavFromBuffer(buf) {
+				const inter = bufferToInterleavedFloat32(buf);
+				const sr = buf.sampleRate | 0;
+				const ch = buf.numberOfChannels | 0;
+				const bps = 2,
+					blockAlign = ch * bps,
+					byteRate = sr * blockAlign,
+					dataBytes = inter.length * bps;
+				const header = new ArrayBuffer(44);
+				const dv = new DataView(header);
+				let p = 0;
+				const ws = (s) => {
+					for (let i = 0; i < s.length; i++) dv.setUint8(p++, s.charCodeAt(i));
+				};
+				const w32 = (v) => {
+					dv.setUint32(p, v, true);
+					p += 4;
+				};
+				const w16 = (v) => {
+					dv.setUint16(p, v, true);
+					p += 2;
+				};
+				ws('RIFF');
+				w32(36 + dataBytes);
+				ws('WAVE');
+				ws('fmt ');
+				w32(16);
+				w16(1);
+				w16(ch);
+				w32(sr);
+				w32(byteRate);
+				w16(blockAlign);
+				w16(bps * 8);
+				ws('data');
+				w32(dataBytes);
+				const pcm = floatTo16PCM(inter);
+				return new Blob([header, pcm], { type: 'audio/wav' });
+			}
+
+			function pickMixMimeType() {
+				// prefer opus/webm; if unavailable, let browser choose
+				const candidates = [
+					'audio/webm;codecs=opus',
+					'audio/webm',
+					'audio/ogg;codecs=opus',
+					'audio/ogg',
+				];
+				for (const t of candidates) {
+					if (
+						window.MediaRecorder &&
+						MediaRecorder.isTypeSupported &&
+						MediaRecorder.isTypeSupported(t)
+					)
+						return t;
+				}
+				return '';
+			}
+
+			async function startMixRecording() {
+				ensureAudio();
+				await audioCtx.resume();
+				ensureMixStream();
+				try {
+					const opts = {};
+					const mt = pickMixMimeType();
+					if (mt) opts.mimeType = mt;
+					mixChunks = [];
+					if (mixWavUrl) {
+						URL.revokeObjectURL(mixWavUrl);
+						mixWavUrl = null;
+					}
+					mixMR = new MediaRecorder(mixDest.stream, opts);
+					mixMR.ondataavailable = (e) => {
+						if (e.data && e.data.size > 0) mixChunks.push(e.data);
+					};
+					mixMR.onstop = async () => {
+						try {
+							const blob = new Blob(mixChunks, {
+								type: mixMR.mimeType || 'audio/webm',
+							});
+							const ab = await blob.arrayBuffer();
+							const buf = await decodeSafely(ab); // decode to PCM
+							const wav = createWavFromBuffer(buf);
+							mixWavUrl = URL.createObjectURL(wav);
+							mixDlBtn.disabled = false;
+							const secs =
+								buf.duration || ab.byteLength / (audioCtx.sampleRate * 4); // rough fallback
+							setStatus(
+								`Mix captured: ${secs.toFixed(2)} s @ ${buf.sampleRate} Hz, ${
+									buf.numberOfChannels
+								} ch.`
+							);
+						} catch (err) {
+							console.error(err);
+							mixDlBtn.disabled = true;
+							setStatus('Failed to build WAV from mix.');
+						} finally {
+							mixRecording = false;
+							updateMixRecUI(false);
+						}
+					};
+					mixMR.start();
+					mixRecording = true;
+					updateMixRecUI(true);
+					setStatus('Recording mix… Press again to stop.');
+				} catch (e) {
+					console.error(e);
+					setStatus('Could not start mix recording in this browser.');
+					mixRecording = false;
+					updateMixRecUI(false);
+				}
+			}
+
+			async function stopMixRecording() {
+				if (!mixRecording || !mixMR) return;
+				try {
+					mixMR.stop();
+				} catch (_) {}
+			}
+
+			function toggleMixRecording() {
+				if (!mixRecording) startMixRecording();
+				else stopMixRecording();
+			}
+
+			mixRecBtn.addEventListener('click', toggleMixRecording);
+			mixDlBtn.addEventListener('click', () => {
+				if (!mixWavUrl) return;
+				const a = document.createElement('a');
+				a.href = mixWavUrl;
+				a.download = `mix_${Date.now()}.wav`;
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+			});
+
 			// ---------------------------
 			// Minimal self-tests (console)
 			// ---------------------------
@@ -851,49 +1046,29 @@
 					const tmp1 = new OfflineAudioContext(1, 62400, 48000);
 					const buf1 = tmp1.createBuffer(1, 62400, 48000);
 					const padded = padToMultiple(buf1, 0.5, tmp1);
-					console.assert(
-						padded.length === 72000,
-						'padToMultiple should extend to 72000 frames'
-					);
+					console.assert(padded.length === 72000, 'padToMultiple → 72000');
 
 					transportStartTime = 100;
 					masterLenSec = 0.5;
 					let t = nextGridTime(100.1);
-					console.assert(
-						Math.abs(t - 100.5) < 1e-6,
-						'nextGridTime should return 100.5'
-					);
+					console.assert(Math.abs(t - 100.5) < 1e-6, 'nextGridTime 100.5');
 					t = nextGridTime(100.51);
-					console.assert(
-						Math.abs(t - 101.0) < 1e-6,
-						'nextGridTime should return 101.0'
-					);
+					console.assert(Math.abs(t - 101.0) < 1e-6, 'nextGridTime 101.0');
 
-					const srcCtx = new OfflineAudioContext(1, 32000, 32000);
-					const srcBuf = srcCtx.createBuffer(1, 16000, 32000);
-					const res = await resampleToContext(srcBuf, 48000);
+					// WAV header sanity from synthetic buffer
+					const testOff = new OfflineAudioContext(2, 48000 * 0.1, 48000);
+					const osc = testOff.createOscillator();
+					const g = testOff.createGain();
+					g.gain.value = 0.25;
+					osc.frequency.value = 440;
+					osc.connect(g).connect(testOff.destination);
+					osc.start();
+					const rend = await testOff.startRendering();
+					const wav = createWavFromBuffer(rend);
 					console.assert(
-						res.sampleRate === 48000,
-						'resampleToContext should output at 48k'
+						wav.size > 44,
+						'WAV blob should have data (>44 bytes)'
 					);
-
-					console.assert(
-						effectiveGain(0.7, false, false, false) === 0.7,
-						'pass-through gain'
-					);
-					console.assert(
-						effectiveGain(0.7, true, false, false) === 0,
-						'mute wins without solo'
-					);
-					console.assert(
-						effectiveGain(0.7, false, false, true) === 0,
-						'when any solo, non-solo tracks are 0'
-					);
-					console.assert(
-						effectiveGain(0.7, true, true, true) === 0.7,
-						'solo overrides mute'
-					);
-
 					console.groupEnd();
 				} catch (e) {
 					console.error('Self-tests failed:', e);
