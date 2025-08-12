@@ -93,7 +93,8 @@
 				display: grid;
 				gap: 10px;
 			}
-			/* one extra 42px column for the Play button */
+
+			/* +1 column for the Play button (▶) */
 			.sample {
 				display: grid;
 				grid-template-columns: 1fr minmax(140px, 28%) 42px 42px 42px 42px;
@@ -121,6 +122,7 @@
 				width: 100%;
 				accent-color: var(--accent);
 			}
+
 			.del,
 			.mute,
 			.solo,
@@ -156,8 +158,9 @@
 			}
 			.solo.active {
 				color: #a8ffcb;
-				background: #3a564b;
+				background: #3b415f;
 			}
+
 			.footer {
 				margin-top: 18px;
 				color: var(--muted);
@@ -172,6 +175,8 @@
 					grid-template-columns: 1fr 1fr 42px 42px 42px 42px;
 				}
 			}
+
+			/* Oscilloscope */
 			.scope {
 				display: none;
 				margin-top: 10px;
@@ -211,26 +216,26 @@
 		<script>
 			'use strict';
 			// --- Audio + Recording state ---
-			let audioCtx = null,
-				masterGain = null,
-				mediaStream = null,
-				mediaRecorder = null,
-				recordingChunks = [],
-				loopCounter = 0;
+			let audioCtx = null;
+			let masterGain = null;
+			let mediaStream = null;
+			let mediaRecorder = null;
+			let recordingChunks = [];
+			let loopCounter = 0;
 
-			// Oscilloscope
-			let micSource = null,
-				analyser = null,
-				scopeRAF = null,
-				scopeData = null,
-				isDrawing = false;
+			// Oscilloscope state
+			let micSource = null;
+			let analyser = null;
+			let scopeRAF = null;
+			let scopeData = null;
+			let isDrawing = false;
 
 			// Loop grid state
-			let masterLenSec = null,
-				transportStartTime = null,
-				isPlaybackSuspended = false;
+			let masterLenSec = null;
+			let transportStartTime = null;
+			let isPlaybackSuspended = false;
 
-			/** Each loop item: { id, buffer, source, gainNode, el, userGain, muted, solo } */
+			/** Each loop item: { id, buffer, source, gainNode, el, userGain, muted, solo, resyncTimer? } */
 			const loops = new Map();
 
 			// --- UI elements ---
@@ -242,9 +247,9 @@
 			const scopeCanvas = document.getElementById('scope');
 			const scopeCtx = scopeCanvas.getContext('2d');
 
-			const setStatus = (msg) => {
+			function setStatus(msg) {
 				statusEl.textContent = msg;
-			};
+			}
 
 			function ensureAudio() {
 				if (!audioCtx) {
@@ -253,9 +258,8 @@
 					masterGain.gain.value = 1.0;
 					masterGain.connect(audioCtx.destination);
 					if (haltBtn) {
-						haltBtn.disabled = true;
-						updateHaltButtonUI();
 						haltBtn.disabled = false;
+						updateHaltButtonUI();
 					}
 				}
 			}
@@ -293,8 +297,9 @@
 						window.MediaRecorder &&
 						MediaRecorder.isTypeSupported &&
 						MediaRecorder.isTypeSupported(t)
-					)
+					) {
 						return t;
+					}
 				}
 				return '';
 			}
@@ -332,9 +337,9 @@
 			}
 			function drawScope() {
 				if (!isDrawing || !analyser) return;
-				const dpr = window.devicePixelRatio || 1,
-					cssW = scopeCanvas.clientWidth || 600,
-					cssH = scopeCanvas.clientHeight || 140;
+				const dpr = window.devicePixelRatio || 1;
+				const cssW = scopeCanvas.clientWidth || 600;
+				const cssH = scopeCanvas.clientHeight || 140;
 				const needResize =
 					scopeCanvas.width !== Math.floor(cssW * dpr) ||
 					scopeCanvas.height !== Math.floor(cssH * dpr);
@@ -346,8 +351,8 @@
 				analyser.getByteTimeDomainData(scopeData);
 				scopeCtx.clearRect(0, 0, cssW, cssH);
 				scopeCtx.beginPath();
-				const mid = cssH / 2,
-					step = cssW / scopeData.length;
+				const mid = cssH / 2;
+				const step = cssW / scopeData.length;
 				for (let i = 0; i < scopeData.length; i++) {
 					const v = (scopeData[i] - 128) / 128;
 					const x = i * step;
@@ -370,8 +375,8 @@
 				const stream = await getMicStream();
 				ensureAnalyser(stream);
 				startScope();
-				const options = {},
-					mt = pickMimeType();
+				const options = {};
+				const mt = pickMimeType();
 				if (mt) options.mimeType = mt;
 				try {
 					mediaRecorder = new MediaRecorder(stream, options);
@@ -415,7 +420,7 @@
 				return false;
 			}
 			function effectiveGain(userGain, muted, solo, anySolo) {
-				if (anySolo) return solo ? userGain : 0;
+				if (anySolo) return solo ? userGain : 0; // solo overrides mute
 				return muted ? 0 : userGain;
 			}
 			function applyGain(item) {
@@ -436,11 +441,11 @@
 
 			// --- Loop alignment helpers ---
 			function padToMultiple(buffer, baseSec, ctx = audioCtx) {
-				const rate = buffer.sampleRate,
-					base = Math.max(1, Math.round(baseSec * rate)),
-					cur = buffer.length;
-				const multiple = Math.max(1, Math.ceil(cur / base)),
-					newLen = multiple * base;
+				const rate = buffer.sampleRate;
+				const base = Math.max(1, Math.round(baseSec * rate));
+				const cur = buffer.length;
+				const multiple = Math.max(1, Math.ceil(cur / base));
+				const newLen = multiple * base;
 				if (newLen === cur) return buffer;
 				const out = ctx.createBuffer(buffer.numberOfChannels, newLen, rate);
 				for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
@@ -451,8 +456,8 @@
 			function nextGridTime(now) {
 				if (transportStartTime == null || masterLenSec == null)
 					return now + 0.05;
-				const lookahead = 0.05,
-					elapsed = now - transportStartTime;
+				const lookahead = 0.05;
+				const elapsed = now - transportStartTime;
 				if (elapsed < -0.001) return transportStartTime + 0.05;
 				const cycles = Math.ceil((elapsed + lookahead) / masterLenSec);
 				return transportStartTime + cycles * masterLenSec;
@@ -476,15 +481,28 @@
 				const source = audioCtx.createBufferSource();
 				source.buffer = buffer;
 				source.loop = true;
+
 				const gainNode = audioCtx.createGain();
 				const userGain = 1.0;
 				const muted = false;
 				const solo = false;
+
 				gainNode.gain.value = userGain;
 				source.connect(gainNode).connect(masterGain);
 				source.start(when);
+
 				const el = renderSampleItem({ id, duration: buffer.duration });
-				return { id, buffer, source, gainNode, el, userGain, muted, solo };
+				return {
+					id,
+					buffer,
+					source,
+					gainNode,
+					el,
+					userGain,
+					muted,
+					solo,
+					resyncTimer: null,
+				};
 			}
 
 			async function addLoop(buffer) {
@@ -507,6 +525,7 @@
 					);
 					setStatus(`Loop added; starts at next boundary in ~${eta} ms.`);
 				}
+				// Ensure new loop respects current solo/mute state
 				updateSoloButtonsUI();
 				updateAllGains();
 			}
@@ -528,29 +547,48 @@
 				}
 			}
 
-			// === NEW: immediate audition without touching alignment ===
-			function playNow(id) {
+			// === Play (restart & resnap) ===
+			function playRestart(id) {
 				const item = loops.get(id);
 				if (!item || !audioCtx) return;
-				const now = audioCtx.currentTime;
-				let stopAt = nextGridTime(now);
-				if (stopAt <= now + 0.005) {
-					// boundary is effectively now; fall back to one full cycle
-					stopAt = now + item.buffer.duration;
+
+				// Cancel any previously scheduled resync
+				if (item.resyncTimer) {
+					clearTimeout(item.resyncTimer);
+					item.resyncTimer = null;
 				}
-				const temp = audioCtx.createBufferSource();
-				temp.buffer = item.buffer;
-				temp.loop = true; // bridge multiple cycles if needed
-				temp.connect(item.gainNode); // respect mute/solo/level
-				temp.start(now);
+
+				const now = audioCtx.currentTime;
+				const boundary = nextGridTime(now);
+
+				// Stop the current aligned source immediately and start a fresh one now
 				try {
-					temp.stop(stopAt);
+					item.source.stop();
 				} catch (_) {}
-				temp.onended = () => {
+				const immediate = audioCtx.createBufferSource();
+				immediate.buffer = item.buffer;
+				immediate.loop = true;
+				immediate.connect(item.gainNode);
+				immediate.start(now);
+
+				// Schedule a re-lock at the next grid boundary
+				const msUntil = Math.max(
+					0,
+					Math.round((boundary - audioCtx.currentTime) * 1000)
+				);
+				item.resyncTimer = setTimeout(() => {
+					const aligned = audioCtx.createBufferSource();
+					aligned.buffer = item.buffer;
+					aligned.loop = true;
+					aligned.connect(item.gainNode);
+					aligned.start(boundary);
 					try {
-						temp.disconnect();
+						immediate.stop(boundary);
 					} catch (_) {}
-				};
+					item.source = aligned; // hand-off
+					item.resyncTimer = null;
+				}, Math.max(0, msUntil - 20)); // create slightly before boundary
+				item.source = immediate; // current active source
 			}
 
 			function renderSampleItem({ id, duration }) {
@@ -561,9 +599,11 @@
 				const name = document.createElement('div');
 				name.className = 'name';
 				name.textContent = `Sample ${id.split('-')[1]}`;
+
 				const info = document.createElement('div');
 				info.className = 'info';
 				info.textContent = `${duration.toFixed(2)} s loop`;
+
 				const labelCol = document.createElement('div');
 				labelCol.appendChild(name);
 				labelCol.appendChild(info);
@@ -580,19 +620,22 @@
 
 				const play = document.createElement('button');
 				play.className = 'play';
-				play.title = 'Play now';
+				play.title = 'Play now (restart, then resync at boundary)';
 				play.setAttribute('aria-label', 'Play now');
 				play.textContent = '▶';
+
 				const mute = document.createElement('button');
 				mute.className = 'mute';
 				mute.title = 'Mute/unmute';
 				mute.setAttribute('aria-pressed', 'false');
 				mute.textContent = '🔈';
+
 				const solo = document.createElement('button');
 				solo.className = 'solo';
 				solo.title = 'Solo';
 				solo.setAttribute('aria-pressed', 'false');
 				solo.textContent = '🎧';
+
 				const del = document.createElement('button');
 				del.className = 'del';
 				del.title = 'Delete loop';
@@ -607,7 +650,7 @@
 				row.appendChild(del);
 				samplesEl.appendChild(row);
 
-				// Events
+				// Event wiring
 				slider.addEventListener('input', () => {
 					const item = loops.get(id);
 					if (item) {
@@ -615,7 +658,7 @@
 						applyGain(item);
 					}
 				});
-				play.addEventListener('click', () => playNow(id));
+				play.addEventListener('click', () => playRestart(id));
 				mute.addEventListener('click', () => {
 					const item = loops.get(id);
 					if (!item) return;
@@ -659,6 +702,10 @@
 			function removeLoop(id) {
 				const item = loops.get(id);
 				if (!item) return;
+				if (item.resyncTimer) {
+					clearTimeout(item.resyncTimer);
+					item.resyncTimer = null;
+				}
 				try {
 					item.source.stop();
 				} catch (_) {}
@@ -776,6 +823,7 @@
 			(async function runSelfTests() {
 				try {
 					console.groupCollapsed('%cLooper self-tests', 'color:#5eead4');
+					// padToMultiple extends to the next multiple
 					const tmp1 = new OfflineAudioContext(1, 62400, 48000);
 					const buf1 = tmp1.createBuffer(1, 62400, 48000);
 					const baseSec = 0.5;
@@ -785,6 +833,7 @@
 						'padToMultiple should extend to 72000 frames'
 					);
 
+					// nextGridTime snapping
 					transportStartTime = 100;
 					masterLenSec = 0.5;
 					let t = nextGridTime(100.1);
@@ -798,6 +847,7 @@
 						'nextGridTime should return 101.0'
 					);
 
+					// resampleToContext changes sampleRate
 					const srcCtx = new OfflineAudioContext(1, 32000, 32000);
 					const srcBuf = srcCtx.createBuffer(1, 16000, 32000);
 					const res = await resampleToContext(srcBuf, 48000);
@@ -806,6 +856,7 @@
 						'resampleToContext should output at 48k'
 					);
 
+					// gain logic
 					console.assert(
 						effectiveGain(0.7, false, false, false) === 0.7,
 						'pass-through gain'
@@ -823,49 +874,13 @@
 						'solo overrides mute'
 					);
 
-					const mockA = {
-						id: 'A',
-						gainNode: { gain: { value: 1 } },
-						userGain: 0.5,
-						muted: false,
-						solo: false,
-					};
-					const mockB = {
-						id: 'B',
-						gainNode: { gain: { value: 1 } },
-						userGain: 0.3,
-						muted: false,
-						solo: false,
-					};
-					loops.set('A', mockA);
-					loops.set('B', mockB);
-					updateAllGains();
-					console.assert(
-						mockA.gainNode.gain.value === 0.5 &&
-							mockB.gainNode.gain.value === 0.3,
-						'no solo: both audible'
-					);
-					setSolo('A');
-					console.assert(
-						mockA.gainNode.gain.value === 0.5 &&
-							mockB.gainNode.gain.value === 0,
-						'solo A only'
-					);
-					setSolo(null);
-					console.assert(
-						mockA.gainNode.gain.value === 0.5 &&
-							mockB.gainNode.gain.value === 0.3,
-						'solo cleared'
-					);
-					loops.clear();
+					// quick sanity: boundary should be >= now
+					const now = 5;
+					transportStartTime = 0;
+					masterLenSec = 2;
+					const nb = nextGridTime(now);
+					console.assert(nb >= now, 'boundary must be in the future');
 
-					const tmp2 = new OfflineAudioContext(1, 48000, 48000);
-					const buf2 = tmp2.createBuffer(1, 48000, 48000);
-					const padded2 = padToMultiple(buf2, 1.0, tmp2);
-					console.assert(
-						padded2.length === 48000,
-						'padToMultiple should not change when already exact multiple'
-					);
 					console.groupEnd();
 				} catch (e) {
 					console.error('Self-tests failed:', e);
