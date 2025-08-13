@@ -11,6 +11,9 @@
 				--accent: #5eead4;
 				--text: #e6e8f1;
 				--muted: #9aa0b4;
+				--bar: #2a2f48;
+				--barFill: #5eead4;
+				--handle: #a8ffcb;
 			}
 			* {
 				box-sizing: border-box;
@@ -30,19 +33,9 @@
 				display: grid;
 				place-items: start center;
 			}
-			/* widen the app a touch */
 			.wrap {
-				width: min(1120px, 96vw); /* was: min(900px, 92vw) */
-			}
-
-			/* keep each control wide enough on desktop */
-			.controls {
-				grid-template-columns: repeat(4, minmax(230px, 1fr));
-			}
-
-			/* prevent multi-line labels like "Resume Playback" */
-			.btn {
-				white-space: nowrap;
+				width: min(1120px, 96vw);
+				padding: 28px 16px 48px;
 			}
 			h1 {
 				margin: 6px 0 18px;
@@ -58,7 +51,7 @@
 			}
 			.controls {
 				display: grid;
-				grid-template-columns: repeat(4, 1fr);
+				grid-template-columns: repeat(4, minmax(230px, 1fr));
 				gap: 12px;
 				align-items: center;
 			}
@@ -74,6 +67,7 @@
 					background 0.2s ease, opacity 0.2s ease;
 				box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 				color: #0a1022;
+				white-space: nowrap;
 			}
 			.btn:active {
 				transform: translateY(1px);
@@ -101,6 +95,7 @@
 				font-size: 14px;
 				min-height: 20px;
 			}
+
 			.samples {
 				margin-top: 18px;
 				display: grid;
@@ -124,7 +119,45 @@
 			.sample .info {
 				color: var(--muted);
 				font-size: 12px;
+				margin-bottom: 6px;
 			}
+
+			/* Progress bar + handle */
+			.progWrap {
+				display: grid;
+				gap: 6px;
+			}
+			.prog {
+				position: relative;
+				height: 10px;
+				background: var(--bar);
+				border-radius: 6px;
+				overflow: hidden;
+				user-select: none;
+				touch-action: none;
+			}
+			.prog .fill {
+				position: absolute;
+				inset: 0 auto 0 0;
+				width: 0%;
+				background: var(--barFill);
+				opacity: 0.9;
+			}
+			.prog .handle {
+				position: absolute;
+				top: -5px;
+				width: 12px;
+				height: 20px;
+				background: var(--handle);
+				border-radius: 6px;
+				box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+				cursor: ew-resize;
+				transform: translateX(-50%);
+			}
+			.prog .handle:hover {
+				filter: brightness(1.05);
+			}
+
 			.vcol {
 				display: grid;
 				gap: 6px;
@@ -133,6 +166,7 @@
 				width: 100%;
 				accent-color: var(--accent);
 			}
+
 			.del,
 			.mute,
 			.solo,
@@ -170,6 +204,7 @@
 				color: #a8ffcb;
 				background: #3b415f;
 			}
+
 			@media (max-width: 600px) {
 				.controls {
 					grid-template-columns: 1fr;
@@ -178,6 +213,8 @@
 					grid-template-columns: 1fr 1fr 42px 42px 42px 42px;
 				}
 			}
+
+			/* Oscilloscope */
 			.scope {
 				display: none;
 				margin-top: 10px;
@@ -190,6 +227,7 @@
 			.scope.active {
 				display: block;
 			}
+
 			.footer {
 				margin-top: 18px;
 				color: var(--muted);
@@ -212,7 +250,7 @@
 					<button id="mixRecBtn" class="btn record" aria-pressed="false">
 						⏺ Record Mix
 					</button>
-					<button id="mixDlBtn" class="btn dl" disabled>⬇ Download Mix</button>
+					<button id="mixDlBtn" class="btn dl" disabled>⬇ Download WAV</button>
 				</div>
 				<div id="status" class="status">Ready.</div>
 				<canvas id="scope" class="scope" aria-hidden="true"></canvas>
@@ -226,30 +264,43 @@
 
 		<script>
 			'use strict';
-			// --- Audio + Recording state ---
-			let audioCtx = null,
-				masterGain = null,
-				mediaStream = null,
-				mediaRecorder = null,
-				recordingChunks = [],
-				loopCounter = 0;
 
-			// Oscilloscope
+			/* ===== Core audio state ===== */
+			let audioCtx = null,
+				masterGain = null;
+			let mediaStream = null,
+				mediaRecorder = null,
+				recordingChunks = [];
+			let loopCounter = 0;
+
+			/* Oscilloscope */
 			let micSource = null,
 				analyser = null,
 				scopeRAF = null,
 				scopeData = null,
 				isDrawing = false;
 
-			// Loop grid state
-			let masterLenSec = null,
-				transportStartTime = null,
-				isPlaybackSuspended = false;
+			/* Loop grid + progress bars */
+			let masterLenSec = null; // base grid (first track duration)
+			let transportStartTime = null; // grid start
+			let isPlaybackSuspended = false; // our explicit toggle state
+			let barCycleSec = 0; // longest track for bar width scaling
 
-			/** Each loop item: { id, buffer, source, gainNode, el, userGain, muted, solo, resyncTimer? } */
+			/* Mix recorder */
+			let mixDest = null,
+				mixMR = null,
+				mixChunks = [],
+				mixWavUrl = null,
+				mixRecording = false;
+
+			/* UI tick */
+			let uiRAF = null; // requestAnimationFrame id
+			let frozenNow = 0; // last time when frozen
+
+			/** Each loop: { id, buffer, source, gainNode, el, userGain, muted, solo, resyncTimer?, offsetSec, bar:{wrap,fill,handle} } */
 			const loops = new Map();
 
-			// --- UI elements ---
+			/* UI nodes */
 			const recToggleBtn = document.getElementById('recToggleBtn');
 			const haltBtn = document.getElementById('haltBtn');
 			const mixRecBtn = document.getElementById('mixRecBtn');
@@ -259,22 +310,35 @@
 			const scopeCanvas = document.getElementById('scope');
 			const scopeCtx = scopeCanvas.getContext('2d');
 
-			const setStatus = (m) => {
+			function setStatus(m) {
 				statusEl.textContent = m;
-			};
+			}
 
+			/* ===== Boot audio ===== */
 			function ensureAudio() {
 				if (!audioCtx) {
 					audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 					masterGain = audioCtx.createGain();
 					masterGain.gain.value = 1.0;
 					masterGain.connect(audioCtx.destination);
-					if (haltBtn) {
-						haltBtn.disabled = false;
-						updateHaltButtonUI();
-					}
+
+					audioCtx.addEventListener('statechange', () => {
+						// Keep button label honest and bars frozen while not running
+						if (audioCtx.state === 'running') {
+							isPlaybackSuspended = false;
+							updateHaltButtonUI();
+						} else if (audioCtx.state === 'suspended') {
+							isPlaybackSuspended = true;
+							frozenNow = audioCtx.currentTime;
+							updateHaltButtonUI();
+						}
+					});
+
+					haltBtn.disabled = false;
+					updateHaltButtonUI();
 				}
-				ensureMixStream(); // set up mix tap (no worklet)
+				ensureMixStream();
+				ensureUiTicker();
 			}
 
 			async function getMicStream() {
@@ -299,13 +363,13 @@
 			}
 
 			function pickMimeType() {
-				const candidates = [
+				const c = [
 					'audio/webm;codecs=opus',
 					'audio/ogg;codecs=opus',
 					'audio/webm',
 					'audio/ogg',
 				];
-				for (const t of candidates) {
+				for (const t of c) {
 					if (
 						window.MediaRecorder &&
 						MediaRecorder.isTypeSupported &&
@@ -316,7 +380,7 @@
 				return '';
 			}
 
-			// ---- Oscilloscope helpers ----
+			/* ===== Scope ===== */
 			function ensureAnalyser(stream) {
 				if (!audioCtx) return;
 				if (!micSource) {
@@ -347,15 +411,22 @@
 				scopeCanvas.classList.remove('active');
 				scopeCanvas.setAttribute('aria-hidden', 'true');
 			}
+			function fmtTime(secs) {
+				secs = Math.max(0, secs || 0);
+				const m = Math.floor(secs / 60),
+					s = Math.floor(secs % 60),
+					d = Math.floor((secs - Math.floor(secs)) * 10);
+				return `${m}:${String(s).padStart(2, '0')}.${d}`;
+			}
 			function drawScope() {
 				if (!isDrawing || !analyser) return;
 				const dpr = window.devicePixelRatio || 1,
 					cssW = scopeCanvas.clientWidth || 600,
 					cssH = scopeCanvas.clientHeight || 140;
-				const needResize =
+				if (
 					scopeCanvas.width !== Math.floor(cssW * dpr) ||
-					scopeCanvas.height !== Math.floor(cssH * dpr);
-				if (needResize) {
+					scopeCanvas.height !== Math.floor(cssH * dpr)
+				) {
 					scopeCanvas.width = Math.floor(cssW * dpr);
 					scopeCanvas.height = Math.floor(cssH * dpr);
 					scopeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -367,21 +438,43 @@
 					step = cssW / scopeData.length;
 				for (let i = 0; i < scopeData.length; i++) {
 					const v = (scopeData[i] - 128) / 128;
-					const x = i * step;
-					const y = mid + v * (cssH * 0.45);
+					const x = i * step,
+						y = mid + v * (cssH * 0.45);
 					if (i === 0) scopeCtx.moveTo(x, y);
 					else scopeCtx.lineTo(x, y);
 				}
 				scopeCtx.lineWidth = 2;
 				scopeCtx.strokeStyle = '#79ffe1';
 				scopeCtx.stroke();
+
+				// elapsed while mic recording
+				if (
+					mediaRecorder &&
+					mediaRecorder.state === 'recording' &&
+					audioCtx &&
+					transportStartTime != null
+				) {
+					const t = fmtTime(audioCtx.currentTime - (audioCtx.baseLatency || 0));
+					const label = `REC ${t}`,
+						pad = 6,
+						h = 22;
+					scopeCtx.font =
+						'13px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+					const w = Math.ceil(scopeCtx.measureText(label).width) + pad * 2;
+					const x = cssW - w - 8,
+						y = 8;
+					scopeCtx.fillStyle = 'rgba(0,0,0,0.45)';
+					scopeCtx.fillRect(x, y, w, h);
+					scopeCtx.fillStyle = '#e6e8f1';
+					scopeCtx.fillText(label, x + pad, y + 15);
+				}
 				scopeRAF = requestAnimationFrame(drawScope);
 			}
 			window.addEventListener('resize', () => {
 				if (scopeCanvas.classList.contains('active')) drawScope();
 			});
 
-			// --- Mic Recording (toggle) ---
+			/* ===== Mic record toggle ===== */
 			function updateRecToggleUI(recording) {
 				if (recording) {
 					recToggleBtn.classList.remove('record');
@@ -401,6 +494,7 @@
 				const stream = await getMicStream();
 				ensureAnalyser(stream);
 				startScope();
+
 				const options = {},
 					mt = pickMimeType();
 				if (mt) options.mimeType = mt;
@@ -411,12 +505,14 @@
 					setStatus('Recording is not supported in this browser.');
 					return;
 				}
+
 				recordingChunks = [];
 				mediaRecorder.ondataavailable = (e) => {
 					if (e.data && e.data.size > 0) recordingChunks.push(e.data);
 				};
 				mediaRecorder.onstop = handleRecordingStop;
 				mediaRecorder.start();
+
 				updateRecToggleUI(true);
 				setStatus('Recording… Press again to stop.');
 			}
@@ -432,14 +528,14 @@
 					await stopRecording();
 				else await startRecording();
 			}
-			function decodeSafely(arrayBuffer) {
-				const ab = arrayBuffer.slice(0);
-				return new Promise((resolve, reject) => {
-					audioCtx.decodeAudioData(ab, resolve, reject);
-				});
+			function decodeSafely(ab) {
+				const copy = ab.slice(0);
+				return new Promise((res, rej) =>
+					audioCtx.decodeAudioData(copy, res, rej)
+				);
 			}
 
-			// --- Solo/Mute gain helpers ---
+			/* ===== Solo/Mute gain ===== */
 			function anySoloActive() {
 				for (const [, it] of loops) {
 					if (it.solo) return true;
@@ -452,21 +548,21 @@
 			}
 			function applyGain(item) {
 				if (!item || !item.gainNode) return;
-				const ug = item.userGain ?? 1.0;
-				const anyS = anySoloActive();
-				const target = effectiveGain(ug, !!item.muted, !!item.solo, anyS);
-				item.gainNode.gain.value = target;
+				const ug = item.userGain ?? 1;
+				item.gainNode.gain.value = effectiveGain(
+					ug,
+					!!item.muted,
+					!!item.solo,
+					anySoloActive()
+				);
 			}
 			function updateAllGains() {
-				const anyS = anySoloActive();
 				for (const [, it] of loops) {
-					const ug = it.userGain ?? 1.0;
-					const target = effectiveGain(ug, !!it.muted, !!it.solo, anyS);
-					it.gainNode.gain.value = target;
+					applyGain(it);
 				}
 			}
 
-			// --- Loop alignment helpers ---
+			/* ===== Grid helpers ===== */
 			function padToMultiple(buffer, baseSec, ctx = audioCtx) {
 				const rate = buffer.sampleRate,
 					base = Math.max(1, Math.round(baseSec * rate)),
@@ -491,30 +587,110 @@
 			}
 			async function resampleToContext(buffer, targetRate) {
 				if (!buffer || buffer.sampleRate === targetRate) return buffer;
-				const offline = new OfflineAudioContext(
+				const off = new OfflineAudioContext(
 					buffer.numberOfChannels,
 					Math.ceil(buffer.duration * targetRate),
 					targetRate
 				);
-				const src = offline.createBufferSource();
+				const src = off.createBufferSource();
 				src.buffer = buffer;
-				src.connect(offline.destination);
+				src.connect(off.destination);
 				src.start(0);
-				return await offline.startRendering();
+				return await off.startRendering();
 			}
 
+			/* ===== Phase + restart logic =====
+   We define offsetSec so that buffer phase 0 hits when t == transportStartTime + offsetSec.
+   The handle sets offsetSec directly along the global (longest) bar; we mod by the track's duration. */
+			function phaseOffsetAtTime(item, t) {
+				if (!transportStartTime || !item.buffer) return 0;
+				const dur = item.buffer.duration || 1e-6;
+				const off = (((item.offsetSec || 0) % dur) + dur) % dur;
+				const raw = (t - transportStartTime - off) % dur; // if t == start+off => 0
+				return (raw + dur) % dur;
+			}
+
+			function replaceSource(item, startTime, offset) {
+				const s = audioCtx.createBufferSource();
+				s.buffer = item.buffer;
+				s.loop = true;
+				s.connect(item.gainNode);
+				s.start(startTime, offset);
+				item.source = s;
+			}
+
+			function restartFromOffset(item) {
+				if (!item || !item.buffer || !audioCtx) return;
+				if (item.resyncTimer) {
+					clearTimeout(item.resyncTimer);
+					item.resyncTimer = null;
+				}
+				const now = audioCtx.currentTime,
+					boundary = nextGridTime(now);
+				const offNow = phaseOffsetAtTime(item, now);
+				const offBoundary = phaseOffsetAtTime(item, boundary);
+
+				try {
+					item.source.stop();
+				} catch (_) {}
+				replaceSource(item, now, offNow);
+
+				const msUntil = Math.max(
+					0,
+					Math.round((boundary - audioCtx.currentTime) * 1000)
+				);
+				item.resyncTimer = setTimeout(() => {
+					const prev = item.source;
+					replaceSource(item, boundary, offBoundary);
+					try {
+						prev.stop(boundary);
+					} catch (_) {}
+					item.resyncTimer = null;
+				}, Math.max(0, msUntil - 20));
+			}
+
+			function playRestart(id) {
+				const item = loops.get(id);
+				if (!item || !audioCtx) return;
+				if (item.resyncTimer) {
+					clearTimeout(item.resyncTimer);
+					item.resyncTimer = null;
+				}
+				const now = audioCtx.currentTime,
+					boundary = nextGridTime(now);
+				const offNow = phaseOffsetAtTime(item, now);
+				const offBoundary = phaseOffsetAtTime(item, boundary);
+
+				try {
+					item.source.stop();
+				} catch (_) {}
+				replaceSource(item, now, offNow);
+
+				const msUntil = Math.max(
+					0,
+					Math.round((boundary - audioCtx.currentTime) * 1000)
+				);
+				item.resyncTimer = setTimeout(() => {
+					const prev = item.source;
+					replaceSource(item, boundary, offBoundary);
+					try {
+						prev.stop(boundary);
+					} catch (_) {}
+					item.resyncTimer = null;
+				}, Math.max(0, msUntil - 20));
+			}
+
+			/* ===== Loop creation ===== */
 			function startLoopNode(buffer, when) {
 				const id = `loop-${++loopCounter}`;
 				const source = audioCtx.createBufferSource();
 				source.buffer = buffer;
 				source.loop = true;
 				const gainNode = audioCtx.createGain();
-				const userGain = 1.0;
-				const muted = false;
-				const solo = false;
-				gainNode.gain.value = userGain;
+				gainNode.gain.value = 1.0;
 				source.connect(gainNode).connect(masterGain);
 				source.start(when);
+
 				const el = renderSampleItem({ id, duration: buffer.duration });
 				return {
 					id,
@@ -522,13 +698,23 @@
 					source,
 					gainNode,
 					el,
-					userGain,
-					muted,
-					solo,
+					userGain: 1.0,
+					muted: false,
+					solo: false,
 					resyncTimer: null,
+					offsetSec: 0,
 				};
 			}
-
+			function recomputeBarCycle() {
+				let m = 0;
+				for (const [, it] of loops) {
+					m = Math.max(m, it.buffer ? it.buffer.duration : 0);
+				}
+				barCycleSec = m || 0;
+				for (const [, it] of loops) {
+					updateHandleUI(it);
+				}
+			}
 			async function addLoop(buffer) {
 				buffer = await resampleToContext(buffer, audioCtx.sampleRate);
 				if (masterLenSec == null) {
@@ -549,10 +735,10 @@
 					);
 					setStatus(`Loop added; starts at next boundary in ~${eta} ms.`);
 				}
+				recomputeBarCycle();
 				updateSoloButtonsUI();
 				updateAllGains();
 			}
-
 			async function handleRecordingStop() {
 				try {
 					const blob = new Blob(recordingChunks, {
@@ -569,56 +755,39 @@
 				}
 			}
 
-			// === Play (restart now, re-lock at boundary) ===
-			function playRestart(id) {
-				const item = loops.get(id);
-				if (!item || !audioCtx) return;
-				if (item.resyncTimer) {
-					clearTimeout(item.resyncTimer);
-					item.resyncTimer = null;
-				}
-				const now = audioCtx.currentTime,
-					boundary = nextGridTime(now);
-				try {
-					item.source.stop();
-				} catch (_) {}
-				const immediate = audioCtx.createBufferSource();
-				immediate.buffer = item.buffer;
-				immediate.loop = true;
-				immediate.connect(item.gainNode);
-				immediate.start(now);
-				const msUntil = Math.max(
-					0,
-					Math.round((boundary - audioCtx.currentTime) * 1000)
-				);
-				item.resyncTimer = setTimeout(() => {
-					const aligned = audioCtx.createBufferSource();
-					aligned.buffer = item.buffer;
-					aligned.loop = true;
-					aligned.connect(item.gainNode);
-					aligned.start(boundary);
-					try {
-						immediate.stop(boundary);
-					} catch (_) {}
-					item.source = aligned;
-					item.resyncTimer = null;
-				}, Math.max(0, msUntil - 20));
-				item.source = immediate;
-			}
-
+			/* ===== Row UI (with progress bar + handle) ===== */
 			function renderSampleItem({ id, duration }) {
 				const row = document.createElement('div');
 				row.className = 'sample';
 				row.id = id;
+
 				const name = document.createElement('div');
 				name.className = 'name';
 				name.textContent = `Sample ${id.split('-')[1]}`;
 				const info = document.createElement('div');
 				info.className = 'info';
 				info.textContent = `${duration.toFixed(2)} s loop`;
+
+				// bar
+				const progWrap = document.createElement('div');
+				progWrap.className = 'progWrap';
+				const prog = document.createElement('div');
+				prog.className = 'prog';
+				prog.setAttribute('aria-label', 'Time shift / progress');
+				prog.tabIndex = 0;
+				const fill = document.createElement('div');
+				fill.className = 'fill';
+				const handle = document.createElement('div');
+				handle.className = 'handle';
+				prog.appendChild(fill);
+				prog.appendChild(handle);
+				progWrap.appendChild(prog);
+
 				const labelCol = document.createElement('div');
 				labelCol.appendChild(name);
 				labelCol.appendChild(info);
+				labelCol.appendChild(progWrap);
+
 				const vcol = document.createElement('div');
 				vcol.className = 'vcol';
 				const slider = document.createElement('input');
@@ -628,9 +797,10 @@
 				slider.value = '100';
 				slider.setAttribute('aria-label', 'Level');
 				vcol.appendChild(slider);
+
 				const play = document.createElement('button');
 				play.className = 'play';
-				play.title = 'Play now (restart, then resync at boundary)';
+				play.title = 'Play now';
 				play.setAttribute('aria-label', 'Play now');
 				play.textContent = '▶';
 				const mute = document.createElement('button');
@@ -648,6 +818,7 @@
 				del.title = 'Delete loop';
 				del.setAttribute('aria-label', 'Delete loop');
 				del.textContent = '✕';
+
 				row.appendChild(labelCol);
 				row.appendChild(vcol);
 				row.appendChild(play);
@@ -657,227 +828,209 @@
 				samplesEl.appendChild(row);
 
 				slider.addEventListener('input', () => {
-					const item = loops.get(id);
-					if (item) {
-						item.userGain = parseInt(slider.value, 10) / 100;
-						applyGain(item);
+					const it = loops.get(id);
+					if (it) {
+						it.userGain = parseInt(slider.value, 10) / 100;
+						applyGain(it);
 					}
 				});
 				play.addEventListener('click', () => playRestart(id));
 				mute.addEventListener('click', () => {
-					const item = loops.get(id);
-					if (!item) return;
-					item.muted = !item.muted;
-					mute.classList.toggle('active', item.muted);
-					mute.setAttribute('aria-pressed', String(item.muted));
-					mute.textContent = item.muted ? '🔇' : '🔈';
+					const it = loops.get(id);
+					if (!it) return;
+					it.muted = !it.muted;
+					mute.classList.toggle('active', it.muted);
+					mute.setAttribute('aria-pressed', String(it.muted));
+					mute.textContent = it.muted ? '🔇' : '🔈';
 					updateAllGains();
 				});
-				solo.addEventListener('click', () => {
-					toggleSolo(id);
-				});
+				solo.addEventListener('click', () => toggleSolo(id));
 				del.addEventListener('click', () => removeLoop(id));
+
+				// dragging: set offsetSec along global bar, then restart from that phase
+				let dragging = false;
+				function pxToOffsetSec(clientX) {
+					if (!barCycleSec) return 0;
+					const r = prog.getBoundingClientRect();
+					const frac = Math.min(
+						1,
+						Math.max(0, (clientX - r.left) / Math.max(1, r.width))
+					);
+					return frac * barCycleSec;
+				}
+				function applyOffsetAt(clientX) {
+					const it = loops.get(id);
+					if (!it) return;
+					it.offsetSec = pxToOffsetSec(clientX);
+					updateHandleUI(it);
+				}
+				function onDown(e) {
+					dragging = true;
+					prog.setPointerCapture(e.pointerId);
+					e.preventDefault();
+					applyOffsetAt(e.clientX);
+				}
+				function onMove(e) {
+					if (!dragging) return;
+					applyOffsetAt(e.clientX);
+				}
+				function onUp(e) {
+					if (!dragging) return;
+					dragging = false;
+					try {
+						prog.releasePointerCapture(e.pointerId);
+					} catch (_) {}
+					const it = loops.get(id);
+					if (!it) return;
+					restartFromOffset(it); // audible commit
+				}
+				prog.addEventListener('pointerdown', onDown);
+				prog.addEventListener('pointermove', onMove);
+				prog.addEventListener('pointerup', onUp);
+				prog.addEventListener('pointercancel', onUp);
+				handle.addEventListener('pointerdown', onDown);
+
+				// attach bar refs
+				queueMicrotask(() => {
+					const it = loops.get(id);
+					if (it) {
+						it.bar = { wrap: prog, fill, handle };
+						updateHandleUI(it);
+					}
+				});
+
 				return row;
 			}
 
-			function toggleSolo(id) {
-				const current = loops.get(id);
-				if (!current) return;
-				const enable = !current.solo;
-				setSolo(enable ? id : null);
+			function updateHandleUI(item) {
+				if (!item || !item.bar || !barCycleSec) return;
+				const frac = ((item.offsetSec || 0) % barCycleSec) / barCycleSec;
+				item.bar.handle.style.left = `${frac * 100}%`;
 			}
-			function setSolo(selectedId) {
-				for (const [, item] of loops) {
-					item.solo = selectedId !== null && item.id === selectedId;
-				}
+			function updateFillUI(item, now) {
+				if (!item || !item.bar || !item.buffer || transportStartTime == null)
+					return;
+				const dur = item.buffer.duration || 0;
+				if (dur <= 0 || barCycleSec <= 0) return;
+				// position inside this track at absolute time "now"
+				const off = (((item.offsetSec || 0) % dur) + dur) % dur;
+				const posTrack = (((now - transportStartTime - off) % dur) + dur) % dur;
+				const frac = Math.max(0, Math.min(1, posTrack / barCycleSec)); // scaled to longest
+				item.bar.fill.style.width = `${frac * 100}%`;
+			}
+
+			/* ===== Solo helpers ===== */
+			function toggleSolo(id) {
+				const cur = loops.get(id);
+				if (!cur) return;
+				const enable = !cur.solo;
+				for (const [, it] of loops) it.solo = enable ? it.id === id : false;
 				updateSoloButtonsUI();
 				updateAllGains();
 			}
 			function updateSoloButtonsUI() {
-				for (const [, item] of loops) {
-					const row = document.getElementById(item.id);
+				for (const [, it] of loops) {
+					const row = document.getElementById(it.id);
 					if (!row) continue;
-					const btn = row.querySelector('.solo');
-					if (!btn) continue;
-					btn.classList.toggle('active', !!item.solo);
-					btn.setAttribute('aria-pressed', String(!!item.solo));
+					const b = row.querySelector('.solo');
+					if (!b) continue;
+					b.classList.toggle('active', !!it.solo);
+					b.setAttribute('aria-pressed', String(!!it.solo));
 				}
 			}
 
+			/* ===== Remove loop ===== */
 			function removeLoop(id) {
-				const item = loops.get(id);
-				if (!item) return;
-				if (item.resyncTimer) {
-					clearTimeout(item.resyncTimer);
-					item.resyncTimer = null;
+				const it = loops.get(id);
+				if (!it) return;
+				if (it.resyncTimer) {
+					clearTimeout(it.resyncTimer);
+					it.resyncTimer = null;
 				}
 				try {
-					item.source.stop();
+					it.source.stop();
 				} catch (_) {}
 				try {
-					item.source.disconnect();
+					it.source.disconnect();
 				} catch (_) {}
 				try {
-					item.gainNode.disconnect();
+					it.gainNode.disconnect();
 				} catch (_) {}
-				if (item.el && item.el.parentNode) {
-					item.el.parentNode.removeChild(item.el);
-				}
-				const wasSolo = !!item.solo;
+				if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el);
+				const wasSolo = !!it.solo;
 				loops.delete(id);
 				if (loops.size === 0) {
 					masterLenSec = null;
 					transportStartTime = null;
+					barCycleSec = 0;
+				} else {
+					recomputeBarCycle();
 				}
 				if (wasSolo) {
-					setSolo(null);
-				} else {
 					updateSoloButtonsUI();
 					updateAllGains();
 				}
 				setStatus('Loop removed.');
 			}
 
-			function teardown() {
-				for (const [, item] of loops) {
+			/* ===== Halt / Resume (fixed) ===== */
+			function updateHaltButtonUI() {
+				haltBtn.textContent =
+					audioCtx && audioCtx.state === 'running'
+						? '⏹ Stop Playback'
+						: '▶ Resume Playback';
+			}
+			haltBtn.addEventListener('click', async () => {
+				ensureAudio();
+				try {
+					if (audioCtx.state === 'running') {
+						// fade then suspend (and freeze bars)
+						masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.01);
+						await audioCtx.suspend();
+						isPlaybackSuspended = true;
+						frozenNow = audioCtx.currentTime;
+						updateHaltButtonUI();
+						setStatus('Playback suspended.');
+					} else {
+						// suspended -> resume and restore volume
+						await audioCtx.resume();
+						masterGain.gain.setTargetAtTime(1, audioCtx.currentTime, 0.01);
+						isPlaybackSuspended = false;
+						updateHaltButtonUI();
+						setStatus('Playback resumed.');
+					}
+				} catch (e) {
+					console.error(e);
+				}
+			});
+
+			/* Important: DO NOT auto-resume the context while the user has explicitly suspended it. */
+			/* We only help resume for recording start via startRecording(). */
+			recToggleBtn.addEventListener('click', () => {
+				toggleRecording();
+			});
+
+			window.addEventListener('beforeunload', () => {
+				for (const [, it] of loops) {
 					try {
-						item.source.stop();
+						it.source.stop();
 					} catch (_) {}
 				}
 				loops.clear();
-				stopScope();
-				if (micSource) {
-					try {
-						micSource.disconnect();
-					} catch (_) {}
-					micSource = null;
-				}
-				if (analyser) {
-					try {
-						analyser.disconnect();
-					} catch (_) {}
-					analyser = null;
-				}
-				if (haltBtn) {
-					haltBtn.disabled = true;
-				}
 				if (mixWavUrl) {
 					URL.revokeObjectURL(mixWavUrl);
 					mixWavUrl = null;
 				}
-				isPlaybackSuspended = false;
-			}
-
-			// --- Playback Halt/Resume ---
-			function updateHaltButtonUI() {
-				if (!haltBtn) return;
-				haltBtn.textContent = isPlaybackSuspended
-					? '▶ Resume Playback'
-					: '⏹ Stop Playback';
-			}
-			if (haltBtn) {
-				haltBtn.addEventListener('click', async () => {
-					ensureAudio();
-					if (!audioCtx) return;
-					try {
-						if (!isPlaybackSuspended) {
-							masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.01);
-							try {
-								await audioCtx.suspend();
-							} catch (_) {}
-							isPlaybackSuspended = true;
-							setStatus('Playback suspended.');
-						} else {
-							try {
-								await audioCtx.resume();
-							} catch (_) {}
-							masterGain.gain.setTargetAtTime(1, audioCtx.currentTime, 0.01);
-							isPlaybackSuspended = false;
-							setStatus('Playback resumed.');
-						}
-						updateHaltButtonUI();
-					} catch (e) {
-						console.error(e);
-					}
-				});
-			}
-
-			// --- Keyboard: Space = mic record, Shift+Space = playback toggle (not on inputs)
-			function isInteractive(el) {
-				if (!el) return false;
-				const tag = el.tagName ? el.tagName.toLowerCase() : '';
-				return (
-					el.isContentEditable ||
-					tag === 'input' ||
-					tag === 'textarea' ||
-					tag === 'select' ||
-					tag === 'button' ||
-					el.getAttribute('role') === 'button'
-				);
-			}
-			window.addEventListener('keydown', (e) => {
-				const isSpace = e.code === 'Space' || e.key === ' ';
-				if (!isSpace) return;
-				const el = document.activeElement;
-				if (isInteractive(el)) return;
-				e.preventDefault();
-				if (e.shiftKey) {
-					if (haltBtn && !haltBtn.disabled) haltBtn.click();
-				} else {
-					toggleRecording();
-				}
 			});
 
-			// --- Hook up UI ---
-			recToggleBtn.addEventListener('click', () => {
-				toggleRecording();
-			});
-			['click', 'touchstart', 'keydown'].forEach((evt) => {
-				window.addEventListener(
-					evt,
-					() => {
-						if (audioCtx && audioCtx.state === 'suspended') {
-							audioCtx.resume();
-						}
-					},
-					{ once: false, passive: true }
-				);
-			});
-			window.addEventListener('beforeunload', teardown);
-
-			// ===============================
-			// Mix Recorder (MediaStream tap)
-			// ===============================
-			let mixDest = null,
-				mixMR = null,
-				mixChunks = [],
-				mixWavUrl = null,
-				mixRecording = false;
-
+			/* ===== Mix Recorder ===== */
 			function ensureMixStream() {
 				if (!audioCtx) return;
 				if (!mixDest) {
 					mixDest = audioCtx.createMediaStreamDestination();
-					// parallel tap: keep existing masterGain -> destination
 					masterGain.connect(mixDest);
 				}
 			}
-
-			function updateMixRecUI(recording) {
-				if (recording) {
-					mixRecBtn.classList.remove('record');
-					mixRecBtn.classList.add('stop');
-					mixRecBtn.textContent = '■ Stop Mix';
-					mixRecBtn.setAttribute('aria-pressed', 'true');
-					mixDlBtn.disabled = true;
-				} else {
-					mixRecBtn.classList.remove('stop');
-					mixRecBtn.classList.add('record');
-					mixRecBtn.textContent = '⏺ Record Mix';
-					mixRecBtn.setAttribute('aria-pressed', 'false');
-				}
-			}
-
 			function bufferToInterleavedFloat32(buf) {
 				const ch = buf.numberOfChannels | 0,
 					frames = buf.length | 0;
@@ -889,7 +1042,6 @@
 				}
 				return out;
 			}
-
 			function floatTo16PCM(float32) {
 				const dv = new DataView(new ArrayBuffer(float32.length * 2));
 				let off = 0;
@@ -900,7 +1052,6 @@
 				}
 				return dv.buffer;
 			}
-
 			function createWavFromBuffer(buf) {
 				const inter = bufferToInterleavedFloat32(buf);
 				const sr = buf.sampleRate | 0;
@@ -939,16 +1090,14 @@
 				const pcm = floatTo16PCM(inter);
 				return new Blob([header, pcm], { type: 'audio/wav' });
 			}
-
 			function pickMixMimeType() {
-				// prefer opus/webm; if unavailable, let browser choose
-				const candidates = [
+				const c = [
 					'audio/webm;codecs=opus',
 					'audio/webm',
 					'audio/ogg;codecs=opus',
 					'audio/ogg',
 				];
-				for (const t of candidates) {
+				for (const t of c) {
 					if (
 						window.MediaRecorder &&
 						MediaRecorder.isTypeSupported &&
@@ -958,7 +1107,20 @@
 				}
 				return '';
 			}
-
+			function updateMixRecUI(recording) {
+				if (recording) {
+					mixRecBtn.classList.remove('record');
+					mixRecBtn.classList.add('stop');
+					mixRecBtn.textContent = '■ Stop Mix';
+					mixRecBtn.setAttribute('aria-pressed', 'true');
+					mixDlBtn.disabled = true;
+				} else {
+					mixRecBtn.classList.remove('stop');
+					mixRecBtn.classList.add('record');
+					mixRecBtn.textContent = '⏺ Record Mix';
+					mixRecBtn.setAttribute('aria-pressed', 'false');
+				}
+			}
 			async function startMixRecording() {
 				ensureAudio();
 				await audioCtx.resume();
@@ -982,16 +1144,14 @@
 								type: mixMR.mimeType || 'audio/webm',
 							});
 							const ab = await blob.arrayBuffer();
-							const buf = await decodeSafely(ab); // decode to PCM
+							const buf = await decodeSafely(ab);
 							const wav = createWavFromBuffer(buf);
 							mixWavUrl = URL.createObjectURL(wav);
 							mixDlBtn.disabled = false;
-							const secs =
-								buf.duration || ab.byteLength / (audioCtx.sampleRate * 4); // rough fallback
 							setStatus(
-								`Mix captured: ${secs.toFixed(2)} s @ ${buf.sampleRate} Hz, ${
-									buf.numberOfChannels
-								} ch.`
+								`Mix captured: ${buf.duration.toFixed(2)} s @ ${
+									buf.sampleRate
+								} Hz, ${buf.numberOfChannels} ch.`
 							);
 						} catch (err) {
 							console.error(err);
@@ -1013,19 +1173,16 @@
 					updateMixRecUI(false);
 				}
 			}
-
 			async function stopMixRecording() {
 				if (!mixRecording || !mixMR) return;
 				try {
 					mixMR.stop();
 				} catch (_) {}
 			}
-
 			function toggleMixRecording() {
 				if (!mixRecording) startMixRecording();
 				else stopMixRecording();
 			}
-
 			mixRecBtn.addEventListener('click', toggleMixRecording);
 			mixDlBtn.addEventListener('click', () => {
 				if (!mixWavUrl) return;
@@ -1037,9 +1194,46 @@
 				a.remove();
 			});
 
-			// ---------------------------
-			// Minimal self-tests (console)
-			// ---------------------------
+			/* ===== UI ticker (freeze when suspended) ===== */
+			function ensureUiTicker() {
+				if (!uiRAF) uiRAF = requestAnimationFrame(updateBars);
+			}
+			function updateBars() {
+				const running = !!audioCtx && audioCtx.state === 'running';
+				const now = running ? audioCtx.currentTime : frozenNow;
+				for (const [, it] of loops) {
+					updateFillUI(it, now);
+				}
+				uiRAF = requestAnimationFrame(updateBars);
+			}
+
+			/* ===== Keyboard: Space (record), Shift+Space (halt/resume) ===== */
+			function isInteractive(el) {
+				if (!el) return false;
+				const tag = el.tagName ? el.tagName.toLowerCase() : '';
+				return (
+					el.isContentEditable ||
+					tag === 'input' ||
+					tag === 'textarea' ||
+					tag === 'select' ||
+					tag === 'button' ||
+					el.getAttribute('role') === 'button'
+				);
+			}
+			window.addEventListener('keydown', (e) => {
+				const isSpace = e.code === 'Space' || e.key === ' ';
+				if (!isSpace) return;
+				const el = document.activeElement;
+				if (isInteractive(el)) return;
+				e.preventDefault();
+				if (e.shiftKey) {
+					haltBtn.click();
+				} else {
+					toggleRecording();
+				}
+			});
+
+			/* ===== Self-tests (console) ===== */
 			(async function runSelfTests() {
 				try {
 					console.groupCollapsed('%cLooper self-tests', 'color:#5eead4');
@@ -1055,20 +1249,12 @@
 					t = nextGridTime(100.51);
 					console.assert(Math.abs(t - 101.0) < 1e-6, 'nextGridTime 101.0');
 
-					// WAV header sanity from synthetic buffer
-					const testOff = new OfflineAudioContext(2, 48000 * 0.1, 48000);
-					const osc = testOff.createOscillator();
-					const g = testOff.createGain();
-					g.gain.value = 0.25;
-					osc.frequency.value = 440;
-					osc.connect(g).connect(testOff.destination);
-					osc.start();
-					const rend = await testOff.startRendering();
-					const wav = createWavFromBuffer(rend);
-					console.assert(
-						wav.size > 44,
-						'WAV blob should have data (>44 bytes)'
-					);
+					// offset mapping: when t == transportStartTime + offsetSec, phase should be 0
+					const fake = { buffer: { duration: 2 }, offsetSec: 1.25 };
+					transportStartTime = 0;
+					let off = phaseOffsetAtTime(fake, 1.25);
+					console.assert(Math.abs(off - 0) < 1e-6, 'phase zero at offset time');
+
 					console.groupEnd();
 				} catch (e) {
 					console.error('Self-tests failed:', e);
@@ -1076,8 +1262,39 @@
 					masterLenSec = null;
 					transportStartTime = null;
 					loops.clear();
+					barCycleSec = 0;
 				}
 			})();
+
+			/* ===== Add loop from mic ===== */
+			async function handleRecordingStop() {
+				try {
+					const blob = new Blob(recordingChunks, {
+						type: mediaRecorder.mimeType || 'audio/webm',
+					});
+					const ab = await blob.arrayBuffer();
+					const buffer = await decodeSafely(ab);
+					await addLoop(buffer);
+				} catch (err) {
+					console.error(err);
+					setStatus('Could not decode audio. Please try another recording.');
+				} finally {
+					updateRecToggleUI(false);
+				}
+			}
+
+			/* ===== Add loop row helpers ===== */
+			function updateSoloButtonsUI() {
+				for (const [, it] of loops) {
+					const row = document.getElementById(it.id);
+					if (!row) continue;
+					const b = row.querySelector('.solo');
+					if (b) {
+						b.classList.toggle('active', !!it.solo);
+						b.setAttribute('aria-pressed', String(!!it.solo));
+					}
+				}
+			}
 		</script>
 	</body>
 </html>
