@@ -952,18 +952,22 @@
 				return row;
 			}
 
-			/* ======= VISUAL PROGRESS — fills over the loop’s own period, never before handle ======= */
+			/* ======= VISUAL PROGRESS — fills over (period − offset), never before handle ======= */
 			function updateFillUI(it, now) {
 				if (!it || !it.bar || transportStartTime == null) return;
 
-				// cycle start aligned to (transport + offset) and repeating every period
-				const anchor = transportStartTime + it.offsetInBar;
+				const leftFrac = it.offsetInBar / it.periodSec; // handle position on the period-length bar
+				const dur = it.periodSec - it.offsetInBar; // audible portion after shift
+
+				const anchor = transportStartTime + it.offsetInBar; // cycle anchor
 				const k = Math.floor((now - anchor) / it.periodSec);
 				const cycleStart = anchor + Math.max(0, k) * it.periodSec;
-				const prog = Math.min(it.periodSec, Math.max(0, now - cycleStart)); // 0..periodSec
 
-				it.bar.fill.style.left = `${(it.offsetInBar / it.periodSec) * 100}%`;
-				it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
+				const elapsed = Math.max(0, now - cycleStart); // elapsed since cycle start
+				const prog = Math.min(elapsed, dur); // cap at audible duration
+
+				it.bar.fill.style.left = `${leftFrac * 100}%`;
+				it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`; // never exceeds (1 - leftFrac)
 			}
 
 			/* ========= Solo ========= */
