@@ -114,12 +114,12 @@
 				font-size: 14px;
 			}
 			.sample .info {
-				color: var(--muted);
+				color: #9aa0b4;
 				font-size: 12px;
-				margin-bottom: 6px;
-			}
+				margin-bottom: 16px;
+			} /* keeps handle clear */
 
-			/* Progress bar + handle (one master bar long) */
+			/* Progress bar + handle */
 			.progWrap {
 				display: grid;
 				gap: 6px;
@@ -129,7 +129,7 @@
 				height: 10px;
 				background: var(--bar);
 				border-radius: 6px;
-				overflow: hidden;
+				overflow: visible;
 				user-select: none;
 				touch-action: none;
 			}
@@ -144,14 +144,16 @@
 			}
 			.prog .handle {
 				position: absolute;
-				top: -7px;
-				width: 12px;
-				height: 24px; /* taller handle */
+				top: -14px;
+				width: 14px;
+				height: 32px;
 				background: var(--handle);
-				border-radius: 6px;
-				box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+				border-radius: 7px;
+				box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35),
+					0 0 0 1px rgba(0, 0, 0, 0.25) inset;
 				cursor: ew-resize;
 				transform: translateX(-50%);
+				z-index: 2;
 			}
 
 			.vcol {
@@ -165,7 +167,7 @@
 				align-items: center;
 			}
 			.row label {
-				color: var(--muted);
+				color: #9aa0b4;
 				font-size: 12px;
 			}
 			.row select,
@@ -184,7 +186,6 @@
 				background: transparent;
 				border: 0;
 			}
-
 			input[type='range'] {
 				width: 100%;
 				accent-color: var(--accent);
@@ -252,7 +253,7 @@
 
 			.footer {
 				margin-top: 18px;
-				color: var(--muted);
+				color: #9aa0b4;
 				font-size: 12px;
 				text-align: center;
 			}
@@ -286,7 +287,7 @@
 		<script>
 			'use strict';
 
-			/* ================= Core audio + recorder ================= */
+			/* ========= Core audio ========= */
 			let audioCtx = null,
 				masterGain = null;
 			let mediaStream = null,
@@ -294,36 +295,37 @@
 				recordingChunks = [];
 			let loopCounter = 0;
 
+			/* Scope */
 			let micSource = null,
 				analyser = null,
 				scopeRAF = null,
 				scopeData = null,
 				isDrawing = false;
-			let recStartPerf = 0; // 0-based scope timer
+			let recStartPerf = 0;
 
-			/* Bar / transport */
-			let masterLenSec = null;
+			/* Transport (bar grid) */
+			let masterLenSec = null; // first track length = bar length
 			let transportStartTime = null;
-			let lastBarScheduled = -1;
-			let schedulerTimer = null;
-			const SCHEDULE_AHEAD = 0.25;
-			const SCHED_INTERVAL_MS = 50;
 
+			/* Per-track scheduler */
+			let schedTimer = null;
+			const SCHEDULE_AHEAD = 0.25; // seconds
+			const SCHEDULE_INTERVAL = 50; // ms
+
+			/* Mix recording */
 			let mixDest = null,
 				mixMR = null,
 				mixChunks = [],
 				mixRecording = false;
 
-			/** Each loop:
+			/** loop item:
 			 * { id, buffer, gainNode, el, userGain, muted, solo,
-			 *   offsetInBar, activeSrc, scheduled, bar,
-			 *   fx:{ type:'none'|'echo'|'reverb', wet:number,
-			 *        dryGain, wetGain, fxIn, delay, fb, convolver }
-			 * }
+			 *   offsetInBar, bar:{wrap,fill,handle},
+			 *   periodBars, periodSec, nextStartTime, active:Set, fx:{...} }
 			 */
 			const loops = new Map();
 
-			/* UI nodes */
+			/* ========= DOM ========= */
 			const recToggleBtn = document.getElementById('recToggleBtn');
 			const haltBtn = document.getElementById('haltBtn');
 			const mixRecBtn = document.getElementById('mixRecBtn');
@@ -332,9 +334,7 @@
 			const scopeCanvas = document.getElementById('scope');
 			const scopeCtx = scopeCanvas.getContext('2d');
 
-			const setStatus = (m) => {
-				statusEl.textContent = m;
-			};
+			const setStatus = (m) => (statusEl.textContent = m);
 
 			function ensureAudio() {
 				if (!audioCtx) {
@@ -342,34 +342,23 @@
 					masterGain = audioCtx.createGain();
 					masterGain.gain.value = 1.0;
 					masterGain.connect(audioCtx.destination);
-					audioCtx.addEventListener('statechange', () => {
-						updateHaltButtonUI();
-					});
-					haltBtn.disabled = true;
+					haltBtn.disabled = false;
 					updateHaltButtonUI();
 				}
 			}
 
-			/* ===== Mic record ===== */
+			/* ========= Mic recording ========= */
 			async function getMicStream() {
 				if (mediaStream && mediaStream.active) return mediaStream;
-				try {
-					mediaStream = await navigator.mediaDevices.getUserMedia({
-						audio: {
-							echoCancellation: false,
-							noiseSuppression: false,
-							autoGainControl: false,
-						},
-						video: false,
-					});
-					return mediaStream;
-				} catch (err) {
-					console.error(err);
-					setStatus(
-						'Mic access failed. Please allow permission and try again.'
-					);
-					throw err;
-				}
+				mediaStream = await navigator.mediaDevices.getUserMedia({
+					audio: {
+						echoCancellation: false,
+						noiseSuppression: false,
+						autoGainControl: false,
+					},
+					video: false,
+				});
+				return mediaStream;
 			}
 			function pickMimeType() {
 				const c = [
@@ -395,6 +384,7 @@
 				);
 			}
 
+			/* ========= Oscilloscope ========= */
 			function ensureAnalyser(stream) {
 				if (!micSource) {
 					micSource = audioCtx.createMediaStreamSource(stream);
@@ -478,58 +468,7 @@
 				if (scopeCanvas.classList.contains('active')) drawScope();
 			});
 
-			function updateRecToggleUI(rec) {
-				if (rec) {
-					recToggleBtn.classList.remove('record');
-					recToggleBtn.classList.add('stop');
-					recToggleBtn.textContent = '■ Stop';
-					recToggleBtn.setAttribute('aria-pressed', 'true');
-				} else {
-					recToggleBtn.classList.remove('stop');
-					recToggleBtn.classList.add('record');
-					recToggleBtn.textContent = '● Record';
-					recToggleBtn.setAttribute('aria-pressed', 'false');
-				}
-			}
-			async function startRecording() {
-				ensureAudio();
-				await audioCtx.resume();
-				const stream = await getMicStream();
-				ensureAnalyser(stream);
-				startScope();
-				const opts = {},
-					mt = pickMimeType();
-				if (mt) opts.mimeType = mt;
-				try {
-					mediaRecorder = new MediaRecorder(stream, opts);
-				} catch (e) {
-					console.error(e);
-					setStatus('Recording is not supported in this browser.');
-					return;
-				}
-				recordingChunks = [];
-				mediaRecorder.ondataavailable = (e) => {
-					if (e.data && e.data.size > 0) recordingChunks.push(e.data);
-				};
-				mediaRecorder.onstop = handleRecordingStop;
-				mediaRecorder.start();
-				updateRecToggleUI(true);
-				setStatus('Recording… Press again to stop.');
-			}
-			async function stopRecording() {
-				if (mediaRecorder && mediaRecorder.state === 'recording') {
-					stopScope();
-					mediaRecorder.stop();
-					setStatus('Processing…');
-				}
-			}
-			async function toggleRecording() {
-				if (mediaRecorder && mediaRecorder.state === 'recording')
-					await stopRecording();
-				else await startRecording();
-			}
-
-			/* ===== Solo / mute ===== */
+			/* ========= Solo / mute ========= */
 			function anySoloActive() {
 				for (const [, it] of loops) {
 					if (it.solo) return true;
@@ -554,27 +493,26 @@
 				for (const [, it] of loops) applyGain(it);
 			}
 
-			/* ===== Grid helpers ===== */
-			function padToMultiple(buf, baseSec, ctx = audioCtx) {
-				const rate = buf.sampleRate,
-					base = Math.max(1, Math.round(baseSec * rate)),
-					cur = buf.length;
-				const multiple = Math.max(1, Math.ceil(cur / base)),
-					newLen = multiple * base;
-				if (newLen === cur) return buf;
-				const out = ctx.createBuffer(buf.numberOfChannels, newLen, rate);
-				for (let ch = 0; ch < buf.numberOfChannels; ch++)
-					out.getChannelData(ch).set(buf.getChannelData(ch));
+			/* ========= Helpers ========= */
+			function padToMultiple(buffer, baseSec, ctx) {
+				const rate = buffer.sampleRate | 0;
+				const baseFrames = Math.max(1, Math.round(baseSec * rate));
+				const cur = buffer.length | 0;
+				const multiple = Math.max(1, Math.ceil(cur / baseFrames));
+				const newLen = multiple * baseFrames;
+				if (newLen === cur) return buffer;
+				const out = ctx.createBuffer(buffer.numberOfChannels, newLen, rate);
+				for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+					const src = buffer.getChannelData(ch),
+						dst = out.getChannelData(ch);
+					let pos = 0;
+					while (pos < newLen) {
+						const n = Math.min(src.length, newLen - pos);
+						dst.set(src.subarray(0, n), pos);
+						pos += n;
+					}
+				}
 				return out;
-			}
-			function nextGridTime(now) {
-				if (transportStartTime == null || masterLenSec == null)
-					return now + 0.05;
-				const look = 0.05,
-					elapsed = now - transportStartTime;
-				if (elapsed < -0.001) return transportStartTime + 0.05;
-				const cycles = Math.ceil((elapsed + look) / masterLenSec);
-				return transportStartTime + cycles * masterLenSec;
 			}
 			async function resampleToContext(buffer, targetRate) {
 				if (!buffer || buffer.sampleRate === targetRate) return buffer;
@@ -583,118 +521,43 @@
 					Math.ceil(buffer.duration * targetRate),
 					targetRate
 				);
-				const src = off.createBufferSource();
-				src.buffer = buffer;
-				src.connect(off.destination);
-				src.start(0);
+				const s = off.createBufferSource();
+				s.buffer = buffer;
+				s.connect(off.destination);
+				s.start(0);
 				return await off.startRendering();
 			}
 
-			/* ===== Scheduler (one-shots per bar) ===== */
-			function startScheduler() {
-				if (!schedulerTimer)
-					schedulerTimer = setInterval(schedulerTick, SCHED_INTERVAL_MS);
-			}
-			function stopScheduler() {
-				if (schedulerTimer) {
-					clearInterval(schedulerTimer);
-					schedulerTimer = null;
-				}
-			}
-			function schedulerTick() {
-				if (
-					!audioCtx ||
-					audioCtx.state !== 'running' ||
-					transportStartTime == null ||
-					masterLenSec == null
-				)
-					return;
-				const now = audioCtx.currentTime,
-					horizon = now + SCHEDULE_AHEAD;
-				while (
-					transportStartTime + (lastBarScheduled + 1) * masterLenSec <
-					horizon
-				) {
-					const idx = lastBarScheduled + 1;
-					const barStart = transportStartTime + idx * masterLenSec;
-					scheduleBarAt(barStart);
-					lastBarScheduled = idx;
-				}
-			}
-			function scheduleBarAt(barStart) {
-				for (const [, it] of loops) {
-					const offset = clamp01(it.offsetInBar / masterLenSec) * masterLenSec;
-					const playLen = Math.min(
-						it.buffer.duration,
-						Math.max(0, masterLenSec - offset)
-					);
-					const startAt = barStart + offset;
-					const stopAt = startAt + playLen;
-
-					const src = audioCtx.createBufferSource();
-					src.buffer = it.buffer;
-					src.loop = false;
-
-					// Route through FX: dry + fx
-					src.connect(it.fx.dryGain);
-					src.connect(it.fx.fxIn);
-
-					src.start(startAt, 0, playLen);
-					try {
-						src.stop(stopAt);
-					} catch (_) {}
-
-					if (!it.scheduled) it.scheduled = new Map();
-					it.scheduled.set(barStart, src);
-					src.onended = () => {
-						if (it.scheduled.get(barStart) === src)
-							it.scheduled.delete(barStart);
-						if (it.activeSrc === src) it.activeSrc = null;
-					};
-
-					const msUntil = Math.max(
-						0,
-						Math.round((startAt - audioCtx.currentTime) * 1000)
-					);
-					setTimeout(() => {
-						it.activeSrc = src;
-					}, msUntil);
-				}
-			}
-			function clamp01(x) {
-				return Math.max(0, Math.min(1, x));
-			}
-			function barInfoAt(t) {
-				const idx = Math.floor((t - transportStartTime) / masterLenSec);
-				const barStart = transportStartTime + idx * masterLenSec;
-				const posInBar = t - barStart;
-				return { idx, barStart, posInBar };
+			/* First start ≥ now, aligned to track period and bar offset */
+			function firstStartAfter(now, item) {
+				const anchor = transportStartTime + item.offsetInBar;
+				if (now <= anchor + 0.01) return anchor;
+				const k = Math.ceil((now - anchor) / item.periodSec);
+				return anchor + k * item.periodSec;
 			}
 
-			/* ===== FX helpers ===== */
+			/* ========= FX (echo / reverb) ========= */
 			function generateImpulse(ctx, seconds = 2.2, decay = 2.5) {
-				const rate = ctx.sampleRate | 0;
-				const len = Math.max(1, Math.floor(seconds * rate));
+				const rate = ctx.sampleRate | 0,
+					len = Math.max(1, Math.floor(seconds * rate));
 				const buf = ctx.createBuffer(2, len, rate);
 				for (let ch = 0; ch < 2; ch++) {
-					const data = buf.getChannelData(ch);
+					const d = buf.getChannelData(ch);
 					for (let i = 0; i < len; i++) {
 						const t = i / len;
-						data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+						d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
 					}
 				}
 				return buf;
 			}
 			function createFxFor(item) {
-				const dryGain = audioCtx.createGain();
-				dryGain.connect(item.gainNode);
-				const wetGain = audioCtx.createGain();
-				wetGain.gain.value = 0;
-				wetGain.connect(item.gainNode);
-
+				const dry = audioCtx.createGain();
+				dry.connect(item.gainNode);
+				const wet = audioCtx.createGain();
+				wet.gain.value = 0;
+				wet.connect(item.gainNode);
 				const fxIn = audioCtx.createGain();
 
-				// Echo: delay + feedback loop
 				const delay = audioCtx.createDelay(1.0);
 				delay.delayTime.value = 0.25;
 				const fb = audioCtx.createGain();
@@ -703,59 +566,96 @@
 				delay.connect(fb);
 				fb.connect(delay);
 
-				// Reverb
-				const convolver = audioCtx.createConvolver();
-				convolver.normalize = true;
-				convolver.buffer = generateImpulse(audioCtx, 2.2, 2.6);
-				fxIn.connect(convolver);
+				const conv = audioCtx.createConvolver();
+				conv.normalize = true;
+				conv.buffer = generateImpulse(audioCtx, 2.2, 2.6);
+				fxIn.connect(conv);
 
-				// By default, no effect is routed to wet
 				const fx = {
 					type: 'none',
-					wet: 0,
-					dryGain,
-					wetGain,
+					dry,
+					wet,
 					fxIn,
 					delay,
 					fb,
-					convolver,
+					conv,
+					applyType: (type) => {
+						try {
+							delay.disconnect(wet);
+						} catch (_) {}
+						try {
+							conv.disconnect(wet);
+						} catch (_) {}
+						if (type === 'echo') delay.connect(wet);
+						else if (type === 'reverb') conv.connect(wet);
+					},
+					applyWet: (w) => {
+						dry.gain.value = 1 - w;
+						wet.gain.value = w;
+					},
 				};
-				// Connect chosen effect output to wetGain
-				fx.applyType = (type) => {
-					fx.type = type;
-					try {
-						delay.disconnect(wetGain);
-					} catch (_) {}
-					try {
-						convolver.disconnect(wetGain);
-					} catch (_) {}
-					if (type === 'echo') {
-						delay.connect(wetGain);
-					} else if (type === 'reverb') {
-						convolver.connect(wetGain);
-					}
-					// type 'none' leaves wet path silent
-				};
-				fx.applyWet = (wet) => {
-					fx.wet = wet;
-					dryGain.gain.value = 1 - wet;
-					wetGain.gain.value = wet;
-				};
-				// default
 				fx.applyType('none');
 				fx.applyWet(0);
 				return fx;
 			}
 
-			/* ===== Loop creation ===== */
-			function makeLoopNodes(buffer) {
+			/* ========= One-shot scheduling ========= */
+			function startScheduler() {
+				if (!schedTimer)
+					schedTimer = setInterval(schedulerTick, SCHEDULE_INTERVAL);
+			}
+			function stopScheduler() {
+				if (schedTimer) {
+					clearInterval(schedTimer);
+					schedTimer = null;
+				}
+			}
+
+			function startOneShot(item, when, dur) {
+				const src = audioCtx.createBufferSource();
+				src.buffer = item.buffer;
+				src.loop = false;
+				src.connect(item.fx.dry);
+				src.connect(item.fx.fxIn);
+				src.start(
+					when,
+					0,
+					Math.max(0.001, Math.min(dur, item.buffer.duration))
+				);
+				item.active.add(src);
+				src.onended = () => {
+					item.active.delete(src);
+				};
+			}
+
+			function schedulerTick() {
+				if (
+					!audioCtx ||
+					audioCtx.state !== 'running' ||
+					transportStartTime == null
+				)
+					return;
+				const now = audioCtx.currentTime,
+					horizon = now + SCHEDULE_AHEAD;
+				for (const [, item] of loops) {
+					if (item.nextStartTime == null)
+						item.nextStartTime = firstStartAfter(now, item);
+					while (item.nextStartTime < horizon) {
+						const dur = item.periodSec - item.offsetInBar; // start later → end earlier (truncate)
+						startOneShot(item, item.nextStartTime, dur);
+						item.nextStartTime += item.periodSec;
+					}
+				}
+			}
+
+			/* ========= Loop creation ========= */
+			function makeLoop(buffer) {
 				const id = `loop-${++loopCounter}`;
 				const gainNode = audioCtx.createGain();
 				gainNode.gain.value = 1.0;
 				gainNode.connect(masterGain);
 				const el = renderSampleItem({ id, duration: buffer.duration });
-
-				const item = {
+				return {
 					id,
 					buffer,
 					gainNode,
@@ -764,59 +664,48 @@
 					muted: false,
 					solo: false,
 					offsetInBar: 0,
-					activeSrc: null,
-					scheduled: new Map(),
 					bar: null,
+					periodBars: 1,
+					periodSec: buffer.duration,
+					nextStartTime: null,
+					active: new Set(),
 					fx: null,
 				};
-				item.fx = createFxFor(item); // build FX nodes
-				return item;
 			}
+
 			async function addLoop(buffer) {
+				ensureAudio();
 				buffer = await resampleToContext(buffer, audioCtx.sampleRate);
 
 				if (masterLenSec == null) {
-					masterLenSec = buffer.duration;
-					buffer = padToMultiple(buffer, masterLenSec);
-					ensureAudio();
-					transportStartTime = audioCtx.currentTime + 0.2;
-					const node = makeLoopNodes(buffer);
-					node.buffer = buffer;
-					loops.set(node.id, node);
-					lastBarScheduled = -1;
-					startScheduler();
-					haltBtn.disabled = false;
-					updateHaltButtonUI();
-					setStatus('First loop set as master bar. New loops align to it.');
+					masterLenSec = buffer.duration; // bar length = first loop
+					buffer = padToMultiple(buffer, masterLenSec, audioCtx);
+					transportStartTime = audioCtx.currentTime + 0.25;
 				} else {
-					buffer = padToMultiple(buffer, masterLenSec);
-					ensureAudio();
-					const node = makeLoopNodes(buffer);
-					node.buffer = buffer;
-					loops.set(node.id, node);
-					setStatus('Loop added. It will align to the master bar.');
+					buffer = padToMultiple(buffer, masterLenSec, audioCtx);
 				}
 
+				const item = makeLoop(buffer);
+				item.buffer = buffer;
+				item.periodBars = Math.max(
+					1,
+					Math.round(buffer.duration / masterLenSec)
+				);
+				item.periodSec = item.periodBars * masterLenSec;
+				item.fx = createFxFor(item);
+
+				loops.set(item.id, item);
+
+				// prime scheduler for this item
+				item.nextStartTime = firstStartAfter(audioCtx.currentTime, item);
+				startScheduler();
+
+				setStatus('Loop added. It will align to the master bar.');
 				updateSoloButtonsUI();
 				updateAllGains();
 			}
-			async function handleRecordingStop() {
-				try {
-					const blob = new Blob(recordingChunks, {
-						type: mediaRecorder.mimeType || 'audio/webm',
-					});
-					const ab = await blob.arrayBuffer();
-					const buffer = await decodeSafely(ab);
-					await addLoop(buffer);
-				} catch (err) {
-					console.error(err);
-					setStatus('Could not decode audio. Please try another recording.');
-				} finally {
-					updateRecToggleUI(false);
-				}
-			}
 
-			/* ===== Row UI (bar, level, FX, buttons) ===== */
+			/* ========= Row UI ========= */
 			function renderSampleItem({ id, duration }) {
 				const row = document.createElement('div');
 				row.className = 'sample';
@@ -850,7 +739,6 @@
 
 				const vcol = document.createElement('div');
 				vcol.className = 'vcol';
-				// Level
 				const levelRow = document.createElement('div');
 				levelRow.className = 'row';
 				const levelLabel = document.createElement('label');
@@ -863,13 +751,13 @@
 				levelSlider.setAttribute('aria-label', 'Level');
 				levelRow.appendChild(levelLabel);
 				levelRow.appendChild(levelSlider);
-				// FX type
+
 				const fxRow = document.createElement('div');
 				fxRow.className = 'row';
 				const fxLabel = document.createElement('label');
 				fxLabel.textContent = 'FX';
 				const fxSelect = document.createElement('select');
-				['None', 'Echo', 'Reverb'].forEach((n, i) => {
+				['None', 'Echo', 'Reverb'].forEach((n) => {
 					const opt = document.createElement('option');
 					opt.value = n.toLowerCase();
 					opt.textContent = n;
@@ -877,7 +765,7 @@
 				});
 				fxRow.appendChild(fxLabel);
 				fxRow.appendChild(fxSelect);
-				// Wet
+
 				const wetRow = document.createElement('div');
 				wetRow.className = 'row';
 				const wetLabel = document.createElement('label');
@@ -924,7 +812,7 @@
 				row.appendChild(del);
 				samplesEl.appendChild(row);
 
-				// Wire controls
+				/* events */
 				levelSlider.addEventListener('input', () => {
 					const it = loops.get(id);
 					if (it) {
@@ -946,7 +834,6 @@
 					it.fx.applyWet(parseInt(wetSlider.value, 10) / 100);
 				});
 
-				play.addEventListener('click', () => playRestart(id));
 				mute.addEventListener('click', () => {
 					const it = loops.get(id);
 					if (!it) return;
@@ -959,7 +846,24 @@
 				solo.addEventListener('click', () => toggleSolo(id));
 				del.addEventListener('click', () => removeLoop(id));
 
-				// --- Drag to set offset within the master bar ---
+				// Play immediately; then re-align future cycles to the grid
+				play.addEventListener('click', () => {
+					const it = loops.get(id);
+					if (!it || !audioCtx) return;
+					for (const s of it.active) {
+						try {
+							s.stop(0);
+						} catch (_) {}
+					}
+					it.active.clear();
+					const now = audioCtx.currentTime;
+					const next = firstStartAfter(now, it);
+					const dur = Math.max(0.01, next - now); // play a short slice to the next boundary
+					startOneShot(it, now + 0.01, Math.min(dur, it.buffer.duration));
+					it.nextStartTime = next; // keep future alignment
+				});
+
+				/* time-shift handle (offset within the *bar*, shown on a period-length bar) */
 				function pxToOffset(clientX) {
 					const it = loops.get(id);
 					if (!it || masterLenSec == null) return 0;
@@ -968,19 +872,23 @@
 						1,
 						Math.max(0, (clientX - r.left) / Math.max(1, r.width))
 					);
-					return frac * masterLenSec;
+					// Map drag across the whole period, then fold into bar range to keep alignment
+					const desired = frac * it.periodSec;
+					return desired % masterLenSec;
 				}
 				function setHandle(it) {
-					if (!it || !it.bar || masterLenSec == null) return;
-					const frac = it.offsetInBar / masterLenSec;
-					it.bar.handle.style.left = `${frac * 100}%`;
+					if (!it || !it.bar) return;
+					// On a period-length bar, the handle sits at offset/period
+					it.bar.handle.style.left = `${
+						(it.offsetInBar / it.periodSec) * 100
+					}%`;
 				}
 				function dragAt(clientX) {
 					const it = loops.get(id);
 					if (!it) return;
 					it.offsetInBar = pxToOffset(clientX);
 					setHandle(it);
-					updateFillUI(it, audioCtx ? audioCtx.currentTime : 0);
+					updateFillUI(it, audioCtx ? audioCtx.currentTime : 0); // never draw before handle
 				}
 				let dragging = false;
 				function onDown(e) {
@@ -1000,47 +908,14 @@
 						if (e.pointerId != null) prog.releasePointerCapture(e.pointerId);
 					} catch (_) {}
 					const it = loops.get(id);
-					if (!it || transportStartTime == null || masterLenSec == null) return;
-
-					const now = audioCtx ? audioCtx.currentTime : 0;
-					const { barStart, posInBar } = barInfoAt(now);
-					const pending = it.scheduled && it.scheduled.get(barStart);
-					if (pending) {
+					if (!it || transportStartTime == null || !audioCtx) return;
+					for (const s of it.active) {
 						try {
-							pending.stop(0);
+							s.stop(0);
 						} catch (_) {}
-						it.scheduled.delete(barStart);
-					}
-					if (posInBar < it.offsetInBar) {
-						const playLen = Math.min(
-							it.buffer.duration,
-							Math.max(0, masterLenSec - it.offsetInBar)
-						);
-						const startAt = barStart + it.offsetInBar;
-						const stopAt = startAt + playLen;
-						if (it.activeSrc) {
-							try {
-								it.activeSrc.stop(0);
-							} catch (_) {}
-							it.activeSrc = null;
-						}
-						const src = audioCtx.createBufferSource();
-						src.buffer = it.buffer;
-						src.loop = false;
-						src.connect(it.fx.dryGain);
-						src.connect(it.fx.fxIn);
-						src.start(startAt, 0, playLen);
-						try {
-							src.stop(stopAt);
-						} catch (_) {}
-						if (!it.scheduled) it.scheduled = new Map();
-						it.scheduled.set(barStart, src);
-						src.onended = () => {
-							if (it.scheduled.get(barStart) === src)
-								it.scheduled.delete(barStart);
-							if (it.activeSrc === src) it.activeSrc = null;
-						};
-					}
+					} // cancel current slice
+					it.active.clear();
+					it.nextStartTime = firstStartAfter(audioCtx.currentTime, it); // re-align to new offset
 					setStatus(
 						`Shifted Sample ${id.split('-')[1]} to ${it.offsetInBar.toFixed(
 							2
@@ -1066,7 +941,6 @@
 					document.addEventListener('mouseup', mu, { once: true });
 				});
 
-				// attach bar refs
 				queueMicrotask(() => {
 					const it = loops.get(id);
 					if (it) {
@@ -1078,79 +952,21 @@
 				return row;
 			}
 
-			/* Progress bar drawing for one master bar */
+			/* ======= VISUAL PROGRESS — fills over the loop’s own period, never before handle ======= */
 			function updateFillUI(it, now) {
-				if (
-					!it ||
-					!it.bar ||
-					transportStartTime == null ||
-					masterLenSec == null
-				)
-					return;
-				const idx = Math.floor((now - transportStartTime) / masterLenSec);
-				const barStart = transportStartTime + idx * masterLenSec;
-				const posInBar = now - barStart;
-				const offset = it.offsetInBar;
-				const playLen = Math.min(
-					it.buffer.duration,
-					Math.max(0, masterLenSec - offset)
-				);
-				const leftFrac = offset / masterLenSec;
+				if (!it || !it.bar || transportStartTime == null) return;
 
-				let width = 0;
-				if (posInBar > offset) width = Math.min(playLen, posInBar - offset);
-				const widthFrac = width / masterLenSec;
+				// cycle start aligned to (transport + offset) and repeating every period
+				const anchor = transportStartTime + it.offsetInBar;
+				const k = Math.floor((now - anchor) / it.periodSec);
+				const cycleStart = anchor + Math.max(0, k) * it.periodSec;
+				const prog = Math.min(it.periodSec, Math.max(0, now - cycleStart)); // 0..periodSec
 
-				it.bar.fill.style.left = `${leftFrac * 100}%`;
-				it.bar.fill.style.width = `${
-					Math.max(0, Math.min(1, widthFrac)) * 100
-				}%`;
+				it.bar.fill.style.left = `${(it.offsetInBar / it.periodSec) * 100}%`;
+				it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
 			}
 
-			/* Play now (restart within this bar, truncating at bar end) */
-			function playRestart(id) {
-				const it = loops.get(id);
-				if (
-					!it ||
-					!audioCtx ||
-					transportStartTime == null ||
-					masterLenSec == null
-				)
-					return;
-				const now = audioCtx.currentTime;
-				const idx = Math.floor((now - transportStartTime) / masterLenSec);
-				const barStart = transportStartTime + idx * masterLenSec;
-				const posInBar = now - barStart;
-				const remain = Math.max(0, masterLenSec - posInBar);
-				const dur = Math.min(it.buffer.duration, remain);
-
-				if (it.activeSrc) {
-					try {
-						it.activeSrc.stop(0);
-					} catch (_) {}
-					it.activeSrc = null;
-				}
-				const pending = it.scheduled && it.scheduled.get(barStart);
-				if (pending) {
-					try {
-						pending.stop(0);
-					} catch (_) {}
-					it.scheduled.delete(barStart);
-				}
-
-				const src = audioCtx.createBufferSource();
-				src.buffer = it.buffer;
-				src.loop = false;
-				src.connect(it.fx.dryGain);
-				src.connect(it.fx.fxIn);
-				src.start(now, 0, dur);
-				try {
-					src.stop(now + dur);
-				} catch (_) {}
-				it.activeSrc = src;
-			}
-
-			/* Solo helpers */
+			/* ========= Solo ========= */
 			function toggleSolo(id) {
 				const cur = loops.get(id);
 				if (!cur) return;
@@ -1170,24 +986,16 @@
 				}
 			}
 
-			/* Remove loop */
+			/* ========= Remove ========= */
 			function removeLoop(id) {
 				const it = loops.get(id);
 				if (!it) return;
-				if (it.activeSrc) {
+				for (const s of it.active) {
 					try {
-						it.activeSrc.stop(0);
+						s.stop(0);
 					} catch (_) {}
-					it.activeSrc = null;
 				}
-				if (it.scheduled) {
-					for (const [, s] of it.scheduled) {
-						try {
-							s.stop(0);
-						} catch (_) {}
-					}
-					it.scheduled.clear();
-				}
+				it.active.clear();
 				try {
 					it.gainNode.disconnect();
 				} catch (_) {}
@@ -1196,7 +1004,7 @@
 				setStatus('Loop removed.');
 			}
 
-			/* Halt / Resume */
+			/* ========= Halt / resume ========= */
 			function updateHaltButtonUI() {
 				haltBtn.textContent =
 					audioCtx && audioCtx.state === 'running'
@@ -1216,13 +1024,17 @@
 					setStatus('Playback suspended.');
 				} else {
 					await audioCtx.resume();
+					// re-align all tracks to the current time so scheduling stays correct
+					for (const [, it] of loops) {
+						it.nextStartTime = firstStartAfter(audioCtx.currentTime, it);
+					}
 					masterGain.gain.setTargetAtTime(1, audioCtx.currentTime, 0.01);
 					updateHaltButtonUI();
 					setStatus('Playback resumed.');
 				}
 			});
 
-			/* Mix recorder (auto WAV) */
+			/* ========= Mix recorder (auto WAV) ========= */
 			function ensureMixStream() {
 				if (!audioCtx) return;
 				if (!mixDest) {
@@ -1362,9 +1174,7 @@
 					mixMR.start();
 					updateMixRecUI(true);
 					mixRecording = true;
-					setStatus(
-						'Recording mix… Press again to stop (WAV will auto-download).'
-					);
+					setStatus('Recording mix… Press again to stop (WAV auto-downloads).');
 				} catch (e) {
 					console.error(e);
 					setStatus('Could not start mix recording in this browser.');
@@ -1385,22 +1195,21 @@
 			}
 			mixRecBtn.addEventListener('click', toggleMixRecording);
 
-			/* ===== UI ticker ===== */
-			let uiRAF = null,
-				frozenNow = 0;
+			/* ========= UI ticker (visual per period) ========= */
+			let uiRAF = null;
 			function ensureUiTicker() {
 				if (!uiRAF) uiRAF = requestAnimationFrame(updateBars);
 			}
 			function updateBars() {
-				const running = !!audioCtx && audioCtx.state === 'running';
-				const now = running ? audioCtx.currentTime : frozenNow;
+				const now = !audioCtx ? 0 : audioCtx.currentTime;
 				for (const [, it] of loops) {
 					updateFillUI(it, now);
 				}
 				uiRAF = requestAnimationFrame(updateBars);
 			}
+			ensureUiTicker();
 
-			/* ===== Keyboard ===== */
+			/* ========= Keyboard ========= */
 			function isInteractive(el) {
 				if (!el) return false;
 				const t = el.tagName ? el.tagName.toLowerCase() : '';
@@ -1420,61 +1229,66 @@
 				if (isInteractive(el)) return;
 				e.preventDefault();
 				if (e.shiftKey) haltBtn.click();
-				else toggleRecording();
+				else recToggleBtn.click();
 			});
 
-			/* ===== Base UI hooks ===== */
-			recToggleBtn.addEventListener('click', () => toggleRecording());
+			/* ========= Record toggle ========= */
+			function updateRecToggleUI(rec) {
+				if (rec) {
+					recToggleBtn.classList.remove('record');
+					recToggleBtn.classList.add('stop');
+					recToggleBtn.textContent = '■ Stop';
+					recToggleBtn.setAttribute('aria-pressed', 'true');
+				} else {
+					recToggleBtn.classList.remove('stop');
+					recToggleBtn.classList.add('record');
+					recToggleBtn.textContent = '● Record';
+					recToggleBtn.setAttribute('aria-pressed', 'false');
+				}
+			}
+			recToggleBtn.addEventListener('click', async () => {
+				try {
+					if (mediaRecorder && mediaRecorder.state === 'recording') {
+						stopScope();
+						mediaRecorder.stop();
+						setStatus('Processing…');
+						updateRecToggleUI(false);
+					} else {
+						ensureAudio();
+						await audioCtx.resume();
+						const stream = await getMicStream();
+						ensureAnalyser(stream);
+						startScope();
+						const opts = {},
+							mt = pickMimeType();
+						if (mt) opts.mimeType = mt;
+						mediaRecorder = new MediaRecorder(stream, opts);
+						recordingChunks = [];
+						mediaRecorder.ondataavailable = (e) => {
+							if (e.data && e.data.size > 0) recordingChunks.push(e.data);
+						};
+						mediaRecorder.onstop = handleRecordingStop;
+						mediaRecorder.start();
+						updateRecToggleUI(true);
+						setStatus('Recording… Press again to stop.');
+					}
+				} catch (e) {
+					console.error(e);
+					setStatus('Recording is not supported in this browser.');
+				}
+			});
 			window.addEventListener('beforeunload', () => {
-				stopScheduler();
+				if (schedTimer) clearInterval(schedTimer);
 				for (const [, it] of loops) {
-					if (it.activeSrc) {
+					for (const s of it.active) {
 						try {
-							it.activeSrc.stop(0);
+							s.stop(0);
 						} catch (_) {}
 					}
-					if (it.scheduled) {
-						for (const [, s] of it.scheduled) {
-							try {
-								s.stop(0);
-							} catch (_) {}
-						}
-					}
 				}
 			});
 
-			/* ===== Self-tests (console) ===== */
-			(async function runSelfTests() {
-				try {
-					console.groupCollapsed('%cLooper self-tests', 'color:#5eead4');
-					// padToMultiple
-					const tmp1 = new OfflineAudioContext(1, 62400, 48000);
-					const buf1 = tmp1.createBuffer(1, 62400, 48000);
-					const padded = padToMultiple(buf1, 0.5, tmp1);
-					console.assert(padded.length === 72000, 'padToMultiple → 72000');
-					// nextGridTime
-					transportStartTime = 100;
-					masterLenSec = 0.5;
-					let t = nextGridTime(100.1);
-					console.assert(Math.abs(t - 100.5) < 1e-6, 'nextGridTime 100.5');
-					t = nextGridTime(100.51);
-					console.assert(Math.abs(t - 101.0) < 1e-6, 'nextGridTime 101.0');
-					console.groupEnd();
-				} catch (e) {
-					console.error('Self-tests failed:', e);
-				} finally {
-					transportStartTime = null;
-					masterLenSec = null;
-					lastBarScheduled = -1;
-				}
-			})();
-
-			/* ===== Recording pipeline hook ===== */
-			async function handleRecordingStopFinalize(buffer) {
-				await addLoop(buffer);
-				ensureUiTicker();
-				startScheduler();
-			}
+			/* ========= Recorder stop ========= */
 			async function handleRecordingStop() {
 				try {
 					const blob = new Blob(recordingChunks, {
@@ -1482,13 +1296,33 @@
 					});
 					const ab = await blob.arrayBuffer();
 					const buffer = await decodeSafely(ab);
-					await handleRecordingStopFinalize(buffer);
+					await addLoop(buffer);
 				} catch (err) {
 					console.error(err);
 					setStatus('Could not decode audio. Please try another recording.');
-				} finally {
-					updateRecToggleUI(false);
 				}
+			}
+
+			/* ========= Solo helpers ========= */
+			function updateSoloButtonsUI() {
+				for (const [, it] of loops) {
+					const row = document.getElementById(it.id);
+					if (!row) continue;
+					const btn = row.querySelector('.solo');
+					if (!btn) continue;
+					btn.classList.toggle('active', !!it.solo);
+					btn.setAttribute('aria-pressed', String(!!it.solo));
+				}
+			}
+			function toggleSolo(id) {
+				const current = loops.get(id);
+				if (!current) return;
+				const enable = !current.solo;
+				for (const [, it] of loops) {
+					it.solo = enable ? it.id === id : false;
+				}
+				updateSoloButtonsUI();
+				updateAllGains();
 			}
 		</script>
 	</body>
