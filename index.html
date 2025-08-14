@@ -1,693 +1,1495 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Simple Audio Looper</title>
-<style>
-  :root { --bg:#0f1220; --panel:#171a2a; --accent:#5eead4; --text:#e6e8f1; --muted:#9aa0b4;
-          --bar:#2a2f48; --barFill:#5eead4; --handle:#a8ffcb; }
-  *{ box-sizing:border-box; }
-  body{
-    margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
-    background:radial-gradient(1200px 600px at 50% -10%, #1d2140, #0b0e1a 70%), var(--bg);
-    color:var(--text); min-height:100dvh; display:grid; place-items:start center;
-  }
-  .wrap{ width:min(1120px,96vw); padding:28px 16px 48px; }
-  h1{ margin:6px 0 18px; font-weight:700; letter-spacing:.2px; }
-  .panel{ background:linear-gradient(180deg,#1a1e33,#14182a); border:1px solid #242a42;
-          border-radius:16px; padding:18px; box-shadow:0 8px 28px rgba(0,0,0,.4); }
-  .controls{ display:grid; grid-template-columns:repeat(3,minmax(260px,1fr)); gap:12px; align-items:center; }
-  .btn{
-    appearance:none; border:0; border-radius:12px; padding:16px 18px; font-size:18px; font-weight:700; cursor:pointer;
-    transition:transform .04s ease, box-shadow .2s ease, background .2s ease, opacity .2s ease;
-    box-shadow:0 6px 18px rgba(0,0,0,.35); color:#0a1022; white-space:nowrap;
-  }
-  .btn:active{ transform:translateY(1px); }
-  .btn[disabled]{ opacity:.5; cursor:not-allowed; }
-  .btn.record{ background:linear-gradient(180deg,#ff7a7a,#ff4747); color:#200; }
-  .btn.stop{   background:linear-gradient(180deg,#7af7d6,#3be7c3); }
-  .btn.halt{   background:linear-gradient(180deg,#9cc2ff,#6aa0ff); }
-  .status{ margin-top:10px; color:var(--muted); font-size:14px; min-height:20px; }
-
-  .samples{ margin-top:18px; display:grid; gap:10px; }
-  .sample{
-    display:grid; grid-template-columns: 1fr minmax(140px,28%) 42px 42px 42px 42px;
-    gap:10px; align-items:center; background:var(--panel); border:1px solid #252a40;
-    border-radius:12px; padding:10px 12px;
-  }
-  .sample .name{ font-weight:600; color:#dbe2ff; font-size:14px; }
-  .sample .info{ color:var(--muted); font-size:12px; margin-bottom:6px; }
-
-  /* Progress bar + handle (one master bar long) */
-  .progWrap{ display:grid; gap:6px; }
-  .prog{
-    position:relative; height:10px; background:var(--bar); border-radius:6px; overflow:hidden;
-    user-select:none; touch-action:none;
-  }
-  .prog .fill{ position:absolute; top:0; height:100%; left:0; width:0%; background:var(--barFill); opacity:.9; }
-  .prog .handle{
-    position:absolute; top:-5px; width:12px; height:20px; background:var(--handle);
-    border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,.35); cursor:ew-resize; transform:translateX(-50%);
-  }
-
-  .vcol{ display:grid; gap:6px; }
-  input[type="range"]{ width:100%; accent-color:var(--accent); }
-
-  .del,.mute,.solo,.play{
-    border:0; background:#2a2f48; color:#d7e3ff; border-radius:10px; width:42px; height:42px; font-size:18px; cursor:pointer;
-    transition:background .2s ease, transform .04s ease;
-  }
-  .del{ color:#ffb4b4; }
-  .del:hover,.mute:hover,.solo:hover,.play:hover{ background:#353b5a; }
-  .del:active,.mute:active,.solo:active,.play:active{ transform:translateY(1px); }
-  .mute.active{ color:#ffd28b; background:#3b415f; }
-  .solo.active{ color:#a8ffcb; background:#3b415f; }
-
-  @media (max-width:600px){
-    .controls{ grid-template-columns:1fr; }
-    .sample{ grid-template-columns: 1fr 1fr 42px 42px 42px 42px; }
-  }
-
-  .scope{ display:none; margin-top:10px; background:#0a0d18; border:1px solid #252a40; border-radius:12px; width:100%; height:140px; }
-  .scope.active{ display:block; }
-
-  .footer{ margin-top:18px; color:var(--muted); font-size:12px; text-align:center; }
-</style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>Simple Audio Looper</h1>
-    <div class="panel">
-      <div class="controls">
-        <button id="recToggleBtn" class="btn record" aria-pressed="false">● Record</button>
-        <button id="haltBtn" class="btn halt" disabled>⏹ Stop Playback</button>
-        <button id="mixRecBtn" class="btn record" aria-pressed="false">⏺ Record Mix</button>
-      </div>
-      <div id="status" class="status">Ready.</div>
-      <canvas id="scope" class="scope" aria-hidden="true"></canvas>
-      <div id="samples" class="samples" aria-live="polite"></div>
-    </div>
-    <div class="footer">
-      Space: Mic Record • Shift+Space: Stop/Resume • Tip: adjust levels with the sliders; click ✕ to remove a loop.
-    </div>
-  </div>
-
-<script>
-'use strict';
-
-/* ================= Core audio ================= */
-let audioCtx=null, masterGain=null;
-let mediaStream=null, mediaRecorder=null, recordingChunks=[];
-let loopCounter=0;
-
-/* Oscilloscope */
-let micSource=null, analyser=null, scopeRAF=null, scopeData=null, isDrawing=false;
-let recStartPerf=0; // for 0-based recording timer
-
-/* Bar / transport */
-let masterLenSec=null;         // duration of first loop (master bar length)
-let transportStartTime=null;   // absolute bar zero (AudioContext time)
-let lastBarScheduled=-1;       // index of last bar we scheduled
-let schedulerTimer=null;       // setInterval handle
-const SCHEDULE_AHEAD=0.25;     // seconds of lookahead for scheduling
-const SCHED_INTERVAL_MS=50;
-
-/* Mix recorder */
-let mixDest=null, mixMR=null, mixChunks=[], mixWavUrl=null, mixRecording=false;
-
-/** Each loop:
- * { id, buffer, gainNode, el, userGain, muted, solo,
- *   offsetInBar,                       // 0..masterLenSec
- *   activeSrc: AudioBufferSourceNode | null,
- *   scheduled: Map<barStart:number, AudioBufferSourceNode>,
- *   bar:{wrap, fill, handle}
- * }
- */
-const loops=new Map();
-
-/* UI nodes */
-const recToggleBtn=document.getElementById('recToggleBtn');
-const haltBtn=document.getElementById('haltBtn');
-const mixRecBtn=document.getElementById('mixRecBtn');
-const statusEl=document.getElementById('status');
-const samplesEl=document.getElementById('samples');
-const scopeCanvas=document.getElementById('scope');
-const scopeCtx=scopeCanvas.getContext('2d');
-
-const setStatus=(m)=>{ statusEl.textContent=m; };
-
-/* =============== Bootstrap =============== */
-function ensureAudio(){
-  if (!audioCtx){
-    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    masterGain=audioCtx.createGain();
-    masterGain.gain.value=1.0;
-    masterGain.connect(audioCtx.destination);
-
-    audioCtx.addEventListener('statechange', ()=>{
-      if (audioCtx.state==='suspended'){
-        // capture time for frozen UI bars
-        frozenNow = audioCtx.currentTime;
-      }
-      updateHaltButtonUI();
-    });
-
-    haltBtn.disabled=true; // enable once transport exists
-    updateHaltButtonUI();
-  }
-}
-
-/* =============== Mic record =============== */
-async function getMicStream(){
-  if (mediaStream && mediaStream.active) return mediaStream;
-  try{
-    mediaStream=await navigator.mediaDevices.getUserMedia({
-      audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false},
-      video:false
-    });
-    return mediaStream;
-  }catch(err){ console.error(err); setStatus('Mic access failed. Please allow permission and try again.'); throw err; }
-}
-function pickMimeType(){
-  const c=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm','audio/ogg'];
-  for (const t of c){ if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t; }
-  return '';
-}
-function decodeSafely(ab){ const copy=ab.slice(0); return new Promise((res,rej)=>audioCtx.decodeAudioData(copy,res,rej)); }
-
-function ensureAnalyser(stream){
-  if (!micSource){
-    micSource=audioCtx.createMediaStreamSource(stream);
-    analyser=audioCtx.createAnalyser();
-    analyser.fftSize=2048;
-    analyser.smoothingTimeConstant=0.85;
-    micSource.connect(analyser);
-    scopeData=new Uint8Array(analyser.frequencyBinCount);
-  }
-}
-function startScope(){ if (!analyser) return; isDrawing=true; scopeCanvas.classList.add('active'); scopeCanvas.setAttribute('aria-hidden','false'); drawScope(); }
-function stopScope(){ isDrawing=false; if (scopeRAF){ cancelAnimationFrame(scopeRAF); scopeRAF=null; } try{ scopeCtx.clearRect(0,0,scopeCanvas.width,scopeCanvas.height);}catch(_){}
-  scopeCanvas.classList.remove('active'); scopeCanvas.setAttribute('aria-hidden','true'); }
-function fmtTime(secs){ secs=Math.max(0,secs||0); const m=Math.floor(secs/60), s=Math.floor(secs%60), d=Math.floor((secs-Math.floor(secs))*10); return `${m}:${String(s).padStart(2,'0')}.${d}`; }
-function drawScope(){
-  if (!isDrawing || !analyser) return;
-  const dpr=window.devicePixelRatio||1, cssW=scopeCanvas.clientWidth||600, cssH=scopeCanvas.clientHeight||140;
-  if (scopeCanvas.width!==Math.floor(cssW*dpr)||scopeCanvas.height!==Math.floor(cssH*dpr)){
-    scopeCanvas.width=Math.floor(cssW*dpr); scopeCanvas.height=Math.floor(cssH*dpr); scopeCtx.setTransform(dpr,0,0,dpr,0,0);
-  }
-  analyser.getByteTimeDomainData(scopeData);
-  scopeCtx.clearRect(0,0,cssW,cssH);
-  scopeCtx.beginPath();
-  const mid=cssH/2, step=cssW/scopeData.length;
-  for (let i=0;i<scopeData.length;i++){
-    const v=(scopeData[i]-128)/128, x=i*step, y=mid+v*(cssH*0.45);
-    if (i===0) scopeCtx.moveTo(x,y); else scopeCtx.lineTo(x,y);
-  }
-  scopeCtx.lineWidth=2; scopeCtx.strokeStyle='#79ffe1'; scopeCtx.stroke();
-
-  if (mediaRecorder && mediaRecorder.state==='recording'){
-    const elapsed=(performance.now()-recStartPerf)/1000;
-    const label=`REC ${fmtTime(elapsed)}`, pad=6, h=22;
-    scopeCtx.font='13px system-ui,-apple-system,Segoe UI,Roboto,Arial';
-    const w=Math.ceil(scopeCtx.measureText(label).width)+pad*2;
-    scopeCtx.fillStyle='rgba(0,0,0,0.45)'; scopeCtx.fillRect(cssW-w-8,8,w,h);
-    scopeCtx.fillStyle='#e6e8f1'; scopeCtx.fillText(label, cssW-w-8+pad, 8+15);
-  }
-  scopeRAF=requestAnimationFrame(drawScope);
-}
-window.addEventListener('resize',()=>{ if (scopeCanvas.classList.contains('active')) drawScope(); });
-
-function updateRecToggleUI(rec){
-  if (rec){ recToggleBtn.classList.remove('record'); recToggleBtn.classList.add('stop'); recToggleBtn.textContent='■ Stop'; recToggleBtn.setAttribute('aria-pressed','true'); }
-  else   { recToggleBtn.classList.remove('stop');   recToggleBtn.classList.add('record'); recToggleBtn.textContent='● Record'; recToggleBtn.setAttribute('aria-pressed','false'); }
-}
-async function startRecording(){
-  ensureAudio(); await audioCtx.resume();
-  const stream=await getMicStream(); ensureAnalyser(stream); startScope();
-  const opts={}, mt=pickMimeType(); if (mt) opts.mimeType=mt;
-  try{ mediaRecorder=new MediaRecorder(stream, opts); }catch(e){ console.error(e); setStatus('Recording is not supported in this browser.'); return; }
-  recordingChunks=[]; mediaRecorder.ondataavailable=(e)=>{ if (e.data && e.data.size>0) recordingChunks.push(e.data); };
-  mediaRecorder.onstop=handleRecordingStop;
-  mediaRecorder.start();
-  recStartPerf=performance.now(); // start from 0
-  updateRecToggleUI(true);
-  setStatus('Recording… Press again to stop.');
-}
-async function stopRecording(){ if (mediaRecorder && mediaRecorder.state==='recording'){ stopScope(); mediaRecorder.stop(); setStatus('Processing…'); } }
-async function toggleRecording(){ if (mediaRecorder && mediaRecorder.state==='recording') await stopRecording(); else await startRecording(); }
-
-/* =============== Solo / mute =============== */
-function anySoloActive(){ for (const [,it] of loops){ if (it.solo) return true; } return false; }
-function effectiveGain(g, muted, solo, anySolo){ if (anySolo) return solo ? g : 0; return muted ? 0 : g; }
-function applyGain(it){ if (!it||!it.gainNode) return; const ug=it.userGain??1; it.gainNode.gain.value = effectiveGain(ug, !!it.muted, !!it.solo, anySoloActive()); }
-function updateAllGains(){ for (const [,it] of loops) applyGain(it); }
-
-/* =============== Grid helpers =============== */
-function padToMultiple(buf, baseSec, ctx=audioCtx){
-  const rate=buf.sampleRate, base=Math.max(1,Math.round(baseSec*rate)), cur=buf.length;
-  const multiple=Math.max(1,Math.ceil(cur/base)), newLen=multiple*base;
-  if (newLen===cur) return buf;
-  const out=ctx.createBuffer(buf.numberOfChannels,newLen,rate);
-  for (let ch=0; ch<buf.numberOfChannels; ch++) out.getChannelData(ch).set(buf.getChannelData(ch));
-  return out;
-}
-function nextGridTime(now){
-  if (transportStartTime==null || masterLenSec==null) return now+0.05;
-  const look=0.05, elapsed=now-transportStartTime;
-  if (elapsed<-0.001) return transportStartTime+0.05;
-  const cycles=Math.ceil((elapsed+look)/masterLenSec);
-  return transportStartTime + cycles*masterLenSec;
-}
-async function resampleToContext(buffer, targetRate){
-  if (!buffer || buffer.sampleRate===targetRate) return buffer;
-  const off=new OfflineAudioContext(buffer.numberOfChannels, Math.ceil(buffer.duration*targetRate), targetRate);
-  const src=off.createBufferSource(); src.buffer=buffer; src.connect(off.destination); src.start(0);
-  return await off.startRendering();
-}
-
-/* =============== Scheduler (bar-based one-shots) =============== */
-function startScheduler(){
-  if (schedulerTimer) return;
-  schedulerTimer=setInterval(schedulerTick, SCHED_INTERVAL_MS);
-}
-function stopScheduler(){
-  if (schedulerTimer){ clearInterval(schedulerTimer); schedulerTimer=null; }
-}
-function schedulerTick(){
-  if (!audioCtx || audioCtx.state!=='running' || transportStartTime==null || masterLenSec==null) return;
-  const now=audioCtx.currentTime, horizon=now+SCHEDULE_AHEAD;
-  // schedule bars until horizon
-  while (transportStartTime + (lastBarScheduled+1)*masterLenSec < horizon){
-    const idx=lastBarScheduled+1;
-    const barStart = transportStartTime + idx*masterLenSec;
-    scheduleBarAt(barStart, idx);
-    lastBarScheduled = idx;
-  }
-}
-function scheduleBarAt(barStart, barIndex){
-  for (const [, it] of loops){
-    const offset = clamp01(it.offsetInBar / masterLenSec) * masterLenSec;
-    const playLen = Math.min(it.buffer.duration, Math.max(0, masterLenSec - offset));
-    const startAt = barStart + offset;
-    const stopAt  = startAt + playLen;
-
-    // Create and schedule a one-shot for this bar
-    const src=audioCtx.createBufferSource();
-    src.buffer=it.buffer;
-    src.loop=false;
-    src.connect(it.gainNode);
-    src.start(startAt, 0, playLen);
-    // Stop defensively at stopAt to ensure it ends precisely
-    try{ src.stop(stopAt); }catch(_){}
-
-    // Track scheduled node so a handle change can cancel this bar’s node
-    if (!it.scheduled) it.scheduled=new Map();
-    it.scheduled.set(barStart, src);
-    src.onended = ()=>{ if (it.scheduled && it.scheduled.get(barStart)===src) it.scheduled.delete(barStart); if (it.activeSrc===src) it.activeSrc=null; };
-
-    // Mark active when it begins (cheap timeout)
-    const msUntil = Math.max(0, Math.round((startAt - audioCtx.currentTime)*1000));
-    setTimeout(()=>{ it.activeSrc=src; }, msUntil);
-  }
-}
-function clamp01(x){ return Math.max(0, Math.min(1, x)); }
-
-/* =============== Phase/offset helpers (bar-relative) =============== */
-function barInfoAt(t){
-  const idx=Math.floor((t - transportStartTime)/masterLenSec);
-  const barStart = transportStartTime + idx*masterLenSec;
-  const posInBar = t - barStart;
-  return { idx, barStart, posInBar };
-}
-
-/* =============== Loop creation =============== */
-function makeLoopNodes(buffer){
-  const id=`loop-${++loopCounter}`;
-  const gainNode=audioCtx.createGain(); gainNode.gain.value=1.0;
-  gainNode.connect(masterGain);
-
-  const el=renderSampleItem({ id, duration:buffer.duration });
-  return { id, buffer, gainNode, el, userGain:1.0, muted:false, solo:false, offsetInBar:0,
-           activeSrc:null, scheduled:new Map(), bar:null };
-}
-
-async function addLoop(buffer){
-  buffer=await resampleToContext(buffer, audioCtx.sampleRate);
-
-  if (masterLenSec==null){
-    masterLenSec=buffer.duration;               // master bar = first loop length
-    buffer=padToMultiple(buffer, masterLenSec); // just like before
-    ensureAudio();
-    transportStartTime=audioCtx.currentTime + 0.2;
-    const node=makeLoopNodes(buffer); loops.set(node.id, node);
-    // start scheduling from bar index -1 so index 0 gets scheduled asap
-    lastBarScheduled = -1;
-    startScheduler();
-    haltBtn.disabled=false; updateHaltButtonUI();
-    setStatus('First loop set as master bar. New loops align to it.');
-  }else{
-    buffer=padToMultiple(buffer, masterLenSec);
-    ensureAudio();
-    const node=makeLoopNodes(buffer); loops.set(node.id, node);
-    setStatus('Loop added. It will align to the master bar.');
-  }
-
-  updateSoloButtonsUI();
-  updateAllGains();
-}
-
-async function handleRecordingStop(){
-  try{
-    const blob=new Blob(recordingChunks,{type:mediaRecorder.mimeType||'audio/webm'});
-    const ab=await blob.arrayBuffer();
-    const buffer=await decodeSafely(ab);
-    await addLoop(buffer);
-  }catch(err){ console.error(err); setStatus('Could not decode audio. Please try another recording.'); }
-  finally{ updateRecToggleUI(false); }
-}
-
-/* =============== Row UI =============== */
-function renderSampleItem({ id, duration }){
-  const row=document.createElement('div'); row.className='sample'; row.id=id;
-
-  const name=document.createElement('div'); name.className='name'; name.textContent=`Sample ${id.split('-')[1]}`;
-  const info=document.createElement('div'); info.className='info'; info.textContent=`${duration.toFixed(2)} s loop`;
-
-  const progWrap=document.createElement('div'); progWrap.className='progWrap';
-  const prog=document.createElement('div'); prog.className='prog'; prog.setAttribute('aria-label','Time shift / progress'); prog.tabIndex=0;
-  const fill=document.createElement('div'); fill.className='fill';
-  const handle=document.createElement('div'); handle.className='handle';
-  prog.appendChild(fill); prog.appendChild(handle); progWrap.appendChild(prog);
-
-  const labelCol=document.createElement('div'); labelCol.appendChild(name); labelCol.appendChild(info); labelCol.appendChild(progWrap);
-
-  const vcol=document.createElement('div'); vcol.className='vcol';
-  const slider=document.createElement('input'); slider.type='range'; slider.min='0'; slider.max='100'; slider.value='100'; slider.setAttribute('aria-label','Level');
-  vcol.appendChild(slider);
-
-  const play=document.createElement('button'); play.className='play'; play.title='Play now'; play.setAttribute('aria-label','Play now'); play.textContent='▶';
-  const mute=document.createElement('button'); mute.className='mute'; mute.title='Mute/unmute'; mute.setAttribute('aria-pressed','false'); mute.textContent='🔈';
-  const solo=document.createElement('button'); solo.className='solo'; solo.title='Solo'; solo.setAttribute('aria-pressed','false'); solo.textContent='🎧';
-  const del=document.createElement('button'); del.className='del'; del.title='Delete loop'; del.setAttribute('aria-label','Delete loop'); del.textContent='✕';
-
-  row.appendChild(labelCol); row.appendChild(vcol); row.appendChild(play); row.appendChild(mute); row.appendChild(solo); row.appendChild(del);
-  samplesEl.appendChild(row);
-
-  // Wire controls
-  slider.addEventListener('input',()=>{ const it=loops.get(id); if (it){ it.userGain=parseInt(slider.value,10)/100; applyGain(it); } });
-  play.addEventListener('click',()=>playRestart(id));
-  mute.addEventListener('click',()=>{
-    const it=loops.get(id); if (!it) return;
-    it.muted=!it.muted; mute.classList.toggle('active', it.muted);
-    mute.setAttribute('aria-pressed', String(it.muted));
-    mute.textContent = it.muted ? '🔇' : '🔈';
-    updateAllGains();
-  });
-  solo.addEventListener('click',()=>toggleSolo(id));
-  del.addEventListener('click',()=>removeLoop(id));
-
-  // --- Drag to set offset within the master bar (truncates overflow) ---
-  function pxToOffset(clientX){
-    const it=loops.get(id); if (!it || masterLenSec==null) return 0;
-    const r=prog.getBoundingClientRect();
-    const frac=Math.min(1, Math.max(0, (clientX - r.left)/Math.max(1,r.width)));
-    return frac*masterLenSec;
-  }
-  function setHandle(it){
-    if (!it || !it.bar || masterLenSec==null) return;
-    const frac=(it.offsetInBar/masterLenSec);
-    it.bar.handle.style.left=`${(frac*100)}%`;
-  }
-  function dragAt(clientX){
-    const it=loops.get(id); if (!it) return;
-    it.offsetInBar = pxToOffset(clientX);
-    setHandle(it);
-    // preview fill immediately
-    updateFillUI(it, audioCtx ? audioCtx.currentTime : 0);
-  }
-  let dragging=false;
-  function onDown(e){ dragging=true; if (e.pointerId!=null) prog.setPointerCapture(e.pointerId); e.preventDefault(); dragAt(e.clientX); }
-  function onMove(e){ if (!dragging) return; dragAt(e.clientX); }
-  function onUp(e){
-    if (!dragging) return; dragging=false;
-    try{ if (e.pointerId!=null) prog.releasePointerCapture(e.pointerId);}catch(_){}
-    const it=loops.get(id); if (!it || transportStartTime==null || masterLenSec==null) return;
-
-    // Cancel any scheduled start for the current bar
-    const now=audioCtx ? audioCtx.currentTime : 0;
-    const { barStart, posInBar } = barInfoAt(now);
-    const old = it.scheduled && it.scheduled.get(barStart);
-    if (old){ try{ old.stop(0); }catch(_){} it.scheduled.delete(barStart); }
-
-    // If the new offset is in the future of this bar, schedule it now; otherwise wait for next bar.
-    if (posInBar < it.offsetInBar){
-      const playLen = Math.min(it.buffer.duration, Math.max(0, masterLenSec - it.offsetInBar));
-      const startAt = barStart + it.offsetInBar;
-      const stopAt  = startAt + playLen;
-
-      // Stop current active src (if any) to preview new placement this bar
-      if (it.activeSrc){ try{ it.activeSrc.stop(0); }catch(_){ } it.activeSrc=null; }
-
-      const src=audioCtx.createBufferSource();
-      src.buffer=it.buffer; src.loop=false; src.connect(it.gainNode);
-      src.start(startAt, 0, playLen); try{ src.stop(stopAt); }catch(_){}
-      if (!it.scheduled) it.scheduled=new Map();
-      it.scheduled.set(barStart, src);
-      src.onended=()=>{ if (it.scheduled.get(barStart)===src) it.scheduled.delete(barStart); if (it.activeSrc===src) it.activeSrc=null; };
-    } // else: too late in this bar → silence until next bar
-
-    setStatus(`Shifted Sample ${id.split('-')[1]} to ${it.offsetInBar.toFixed(2)}s of the bar.`);
-  }
-  prog.addEventListener('pointerdown', onDown);
-  prog.addEventListener('pointermove', onMove);
-  prog.addEventListener('pointerup', onUp);
-  prog.addEventListener('pointercancel', onUp);
-  handle.addEventListener('pointerdown', onDown);
-
-  // mouse fallback
-  prog.addEventListener('mousedown', (e)=>{
-    onDown(e);
-    const mm=(ev)=>onMove(ev);
-    const mu=(ev)=>{ document.removeEventListener('mousemove',mm); document.removeEventListener('mouseup',mu); onUp(ev); };
-    document.addEventListener('mousemove',mm);
-    document.addEventListener('mouseup',mu,{once:true});
-  });
-
-  // attach bar refs
-  queueMicrotask(()=>{
-    const it=loops.get(id);
-    if (it){ it.bar={wrap:prog, fill, handle}; setHandle(it); }
-  });
-
-  return row;
-}
-
-/* Progress bar drawing for one master bar */
-let frozenNow=0;
-function updateFillUI(it, now){
-  if (!it || !it.bar || transportStartTime==null || masterLenSec==null) return;
-  const { barStart, posInBar } = barInfoAt(now);
-  const offset = it.offsetInBar;
-  const playLen = Math.min(it.buffer.duration, Math.max(0, masterLenSec - offset));
-  const leftFrac = offset / masterLenSec;
-
-  let width = 0;
-  if (posInBar > offset) width = Math.min(playLen, posInBar - offset);
-  const widthFrac = width / masterLenSec;
-
-  it.bar.fill.style.left  = `${leftFrac*100}%`;
-  it.bar.fill.style.width = `${Math.max(0,Math.min(1,widthFrac))*100}%`;
-}
-
-/* Play now (restart within this bar, truncating at bar end) */
-function playRestart(id){
-  const it=loops.get(id); if (!it || !audioCtx || transportStartTime==null || masterLenSec==null) return;
-  const now=audioCtx.currentTime;
-  const { barStart, posInBar } = barInfoAt(now);
-  const remain = Math.max(0, masterLenSec - posInBar);
-  const dur = Math.min(it.buffer.duration, remain);
-
-  // stop any current node for this bar
-  if (it.activeSrc){ try{ it.activeSrc.stop(0); }catch(_){ } it.activeSrc=null; }
-  const pending = it.scheduled && it.scheduled.get(barStart);
-  if (pending){ try{ pending.stop(0); }catch(_){ } it.scheduled.delete(barStart); }
-
-  const src=audioCtx.createBufferSource(); src.buffer=it.buffer; src.loop=false;
-  src.connect(it.gainNode);
-  src.start(now, 0, dur); try{ src.stop(now + dur); }catch(_){}
-  it.activeSrc=src;
-}
-
-/* Solo helpers */
-function toggleSolo(id){
-  const cur=loops.get(id); if (!cur) return;
-  const enable=!cur.solo;
-  for (const [,it] of loops) it.solo = enable ? (it.id===id) : false;
-  updateSoloButtonsUI(); updateAllGains();
-}
-function updateSoloButtonsUI(){
-  for (const [,it] of loops){
-    const row=document.getElementById(it.id); if (!row) continue;
-    const b=row.querySelector('.solo'); if (!b) continue;
-    b.classList.toggle('active', !!it.solo);
-    b.setAttribute('aria-pressed', String(!!it.solo));
-  }
-}
-
-/* Remove loop */
-function removeLoop(id){
-  const it=loops.get(id); if (!it) return;
-  if (it.activeSrc){ try{ it.activeSrc.stop(0); }catch(_){ } it.activeSrc=null; }
-  if (it.scheduled){ for (const [,s] of it.scheduled){ try{ s.stop(0); }catch(_){ } } it.scheduled.clear(); }
-  try{ it.gainNode.disconnect(); }catch(_){}
-  if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el);
-  loops.delete(id);
-  setStatus('Loop removed.');
-}
-
-/* Halt / Resume */
-function updateHaltButtonUI(){ haltBtn.textContent = (audioCtx && audioCtx.state==='running') ? '⏹ Stop Playback' : '▶ Resume Playback'; }
-haltBtn.addEventListener('click', async ()=>{
-  ensureAudio();
-  if (!transportStartTime){ setStatus('Nothing to play yet. Record a loop first.'); return; }
-  if (audioCtx.state==='running'){
-    masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.01);
-    await audioCtx.suspend();
-    frozenNow = audioCtx.currentTime;
-    updateHaltButtonUI();
-    setStatus('Playback suspended.');
-  }else{
-    await audioCtx.resume();
-    masterGain.gain.setTargetAtTime(1, audioCtx.currentTime, 0.01);
-    updateHaltButtonUI();
-    setStatus('Playback resumed.');
-  }
-});
-
-/* Mix recorder (auto WAV) */
-function ensureMixStream(){ if (!audioCtx) return; if (!mixDest){ mixDest=audioCtx.createMediaStreamDestination(); masterGain.connect(mixDest); } }
-function bufferToInterleavedFloat32(buf){ const ch=buf.numberOfChannels|0, frames=buf.length|0; const out=new Float32Array(frames*ch);
-  for (let i=0;i<frames;i++) for (let c=0;c<ch;c++) out[i*ch+c]=buf.getChannelData(c)[i]||0; return out; }
-function floatTo16PCM(float32){ const dv=new DataView(new ArrayBuffer(float32.length*2)); let off=0;
-  for (let i=0;i<float32.length;i++){ let s=Math.max(-1,Math.min(1,float32[i])); dv.setInt16(off, s<0?s*0x8000:s*0x7FFF, true); off+=2; } return dv.buffer; }
-function createWavFromBuffer(buf){
-  const inter=bufferToInterleavedFloat32(buf); const sr=buf.sampleRate|0; const ch=buf.numberOfChannels|0;
-  const bps=2, blockAlign=ch*bps, byteRate=sr*blockAlign, dataBytes=inter.length*bps;
-  const header=new ArrayBuffer(44); const dv=new DataView(header); let p=0;
-  const ws=(s)=>{ for(let i=0;i<s.length;i++) dv.setUint8(p++, s.charCodeAt(i)); };
-  const w32=(v)=>{ dv.setUint32(p,v,true); p+=4; }; const w16=(v)=>{ dv.setUint16(p,v,true); p+=2; };
-  ws('RIFF'); w32(36+dataBytes); ws('WAVE'); ws('fmt '); w32(16); w16(1); w16(ch); w32(sr); w32(byteRate); w16(blockAlign); w16(bps*8); ws('data'); w32(dataBytes);
-  const pcm=floatTo16PCM(inter);
-  return new Blob([header, pcm], {type:'audio/wav'});
-}
-function pickMixMimeType(){
-  const c=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
-  for (const t of c){ if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t; }
-  return '';
-}
-function updateMixRecUI(rec){
-  if (rec){ mixRecBtn.classList.remove('record'); mixRecBtn.classList.add('stop'); mixRecBtn.textContent='■ Stop Mix'; mixRecBtn.setAttribute('aria-pressed','true'); }
-  else   { mixRecBtn.classList.remove('stop');   mixRecBtn.classList.add('record'); mixRecBtn.textContent='⏺ Record Mix'; mixRecBtn.setAttribute('aria-pressed','false'); }
-}
-async function startMixRecording(){
-  ensureAudio(); await audioCtx.resume(); ensureMixStream();
-  try{
-    const opts={}, mt=pickMixMimeType(); if (mt) opts.mimeType=mt;
-    mixChunks=[]; if (mixWavUrl){ URL.revokeObjectURL(mixWavUrl); mixWavUrl=null; }
-    mixMR=new MediaRecorder(mixDest.stream, opts);
-    mixMR.ondataavailable=(e)=>{ if (e.data && e.data.size>0) mixChunks.push(e.data); };
-    mixMR.onstop=async ()=>{
-      try{
-        const blob=new Blob(mixChunks,{type:mixMR.mimeType||'audio/webm'});
-        const ab=await blob.arrayBuffer();
-        const buf=await decodeSafely(ab);
-        const wav=createWavFromBuffer(buf);
-        const url=URL.createObjectURL(wav);
-        const a=document.createElement('a'); a.href=url; a.download=`mix_${Date.now()}.wav`; document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(()=>URL.revokeObjectURL(url), 4000);
-        setStatus(`Mix captured: ${buf.duration.toFixed(2)} s @ ${buf.sampleRate} Hz.`);
-      }catch(err){ console.error(err); setStatus('Failed to build WAV from mix.'); }
-      finally{ updateMixRecUI(false); mixRecording=false; }
-    };
-    mixMR.start(); updateMixRecUI(true); mixRecording=true; setStatus('Recording mix… Press again to stop (WAV will auto-download).');
-  }catch(e){ console.error(e); setStatus('Could not start mix recording in this browser.'); updateMixRecUI(false); mixRecording=false; }
-}
-async function stopMixRecording(){ if (mixRecording && mixMR){ try{ mixMR.stop(); }catch(_){ } } }
-function toggleMixRecording(){ if (!mixRecording) startMixRecording(); else stopMixRecording(); }
-mixRecBtn.addEventListener('click', toggleMixRecording);
-
-/* =============== UI ticker (bars) =============== */
-let uiRAF=null;
-function ensureUiTicker(){ if (!uiRAF) uiRAF=requestAnimationFrame(updateBars); }
-function updateBars(){
-  const running = !!audioCtx && audioCtx.state==='running';
-  const now = running ? audioCtx.currentTime : frozenNow;
-  for (const [,it] of loops){ updateFillUI(it, now); }
-  uiRAF=requestAnimationFrame(updateBars);
-}
-
-/* =============== Keyboard =============== */
-function isInteractive(el){
-  if (!el) return false;
-  const t=el.tagName?el.tagName.toLowerCase():'';
-  return el.isContentEditable || t==='input' || t==='textarea' || t==='select' || t==='button' || el.getAttribute('role')==='button';
-}
-window.addEventListener('keydown',(e)=>{
-  const isSpace=(e.code==='Space'||e.key===' ');
-  if (!isSpace) return;
-  const el=document.activeElement; if (isInteractive(el)) return;
-  e.preventDefault();
-  if (e.shiftKey) haltBtn.click();
-  else toggleRecording();
-});
-
-/* =============== Hook base UI =============== */
-recToggleBtn.addEventListener('click', ()=>toggleRecording());
-window.addEventListener('beforeunload', ()=>{
-  stopScheduler();
-  for (const [, it] of loops){
-    if (it.activeSrc){ try{ it.activeSrc.stop(0); }catch(_){ } }
-    if (it.scheduled){ for (const [,s] of it.scheduled){ try{ s.stop(0); }catch(_){ } } }
-  }
-});
-
-/* =============== Self-tests (console) =============== */
-(async function runSelfTests(){
-  try{
-    console.groupCollapsed('%cLooper self-tests','color:#5eead4');
-    // padToMultiple
-    const tmp1=new OfflineAudioContext(1,62400,48000);
-    const buf1=tmp1.createBuffer(1,62400,48000);
-    const padded=padToMultiple(buf1,0.5,tmp1);
-    console.assert(padded.length===72000,'padToMultiple → 72000');
-
-    // nextGridTime
-    transportStartTime=100; masterLenSec=0.5;
-    let t=nextGridTime(100.1); console.assert(Math.abs(t-100.5)<1e-6,'nextGridTime 100.5');
-    t=nextGridTime(100.51); console.assert(Math.abs(t-101.0)<1e-6,'nextGridTime 101.0');
-
-    console.groupEnd();
-  }catch(e){ console.error('Self-tests failed:', e); }
-  finally{ transportStartTime=null; masterLenSec=null; lastBarScheduled=-1; }
-})();
-
-/* =============== Recording pipeline hook =============== */
-async function handleRecordingStopFinalize(buffer){
-  await addLoop(buffer);
-  // kick the scheduler so bar 0 queues immediately
-  ensureUiTicker();
-  startScheduler();
-}
-async function handleRecordingStop(){
-  try{
-    const blob=new Blob(recordingChunks,{type:mediaRecorder.mimeType||'audio/webm'});
-    const ab=await blob.arrayBuffer();
-    const buffer=await decodeSafely(ab);
-    await handleRecordingStopFinalize(buffer);
-  }catch(err){ console.error(err); setStatus('Could not decode audio. Please try another recording.'); }
-  finally{ updateRecToggleUI(false); }
-}
-</script>
-</body>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Simple Audio Looper</title>
+		<style>
+			:root {
+				--bg: #0f1220;
+				--panel: #171a2a;
+				--accent: #5eead4;
+				--text: #e6e8f1;
+				--muted: #9aa0b4;
+				--bar: #2a2f48;
+				--barFill: #5eead4;
+				--handle: #a8ffcb;
+			}
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial,
+					sans-serif;
+				background: radial-gradient(
+						1200px 600px at 50% -10%,
+						#1d2140,
+						#0b0e1a 70%
+					),
+					var(--bg);
+				color: var(--text);
+				min-height: 100dvh;
+				display: grid;
+				place-items: start center;
+			}
+			.wrap {
+				width: min(1120px, 96vw);
+				padding: 28px 16px 48px;
+			}
+			h1 {
+				margin: 6px 0 18px;
+				font-weight: 700;
+				letter-spacing: 0.2px;
+			}
+			.panel {
+				background: linear-gradient(180deg, #1a1e33, #14182a);
+				border: 1px solid #242a42;
+				border-radius: 16px;
+				padding: 18px;
+				box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+			}
+			.controls {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(260px, 1fr));
+				gap: 12px;
+				align-items: center;
+			}
+			.btn {
+				appearance: none;
+				border: 0;
+				border-radius: 12px;
+				padding: 16px 18px;
+				font-size: 18px;
+				font-weight: 700;
+				cursor: pointer;
+				transition: transform 0.04s ease, box-shadow 0.2s ease,
+					background 0.2s ease, opacity 0.2s ease;
+				box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+				color: #0a1022;
+				white-space: nowrap;
+			}
+			.btn:active {
+				transform: translateY(1px);
+			}
+			.btn[disabled] {
+				opacity: 0.5;
+				cursor: not-allowed;
+			}
+			.btn.record {
+				background: linear-gradient(180deg, #ff7a7a, #ff4747);
+				color: #200;
+			}
+			.btn.stop {
+				background: linear-gradient(180deg, #7af7d6, #3be7c3);
+			}
+			.btn.halt {
+				background: linear-gradient(180deg, #9cc2ff, #6aa0ff);
+			}
+			.status {
+				margin-top: 10px;
+				color: var(--muted);
+				font-size: 14px;
+				min-height: 20px;
+			}
+
+			.samples {
+				margin-top: 18px;
+				display: grid;
+				gap: 10px;
+			}
+			.sample {
+				display: grid;
+				grid-template-columns: 1fr minmax(220px, 34%) 42px 42px 42px 42px;
+				gap: 10px;
+				align-items: center;
+				background: var(--panel);
+				border: 1px solid #252a40;
+				border-radius: 12px;
+				padding: 10px 12px;
+			}
+			.sample .name {
+				font-weight: 600;
+				color: #dbe2ff;
+				font-size: 14px;
+			}
+			.sample .info {
+				color: var(--muted);
+				font-size: 12px;
+				margin-bottom: 6px;
+			}
+
+			/* Progress bar + handle (one master bar long) */
+			.progWrap {
+				display: grid;
+				gap: 6px;
+			}
+			.prog {
+				position: relative;
+				height: 10px;
+				background: var(--bar);
+				border-radius: 6px;
+				overflow: hidden;
+				user-select: none;
+				touch-action: none;
+			}
+			.prog .fill {
+				position: absolute;
+				top: 0;
+				height: 100%;
+				left: 0;
+				width: 0%;
+				background: var(--barFill);
+				opacity: 0.9;
+			}
+			.prog .handle {
+				position: absolute;
+				top: -7px;
+				width: 12px;
+				height: 24px; /* taller handle */
+				background: var(--handle);
+				border-radius: 6px;
+				box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+				cursor: ew-resize;
+				transform: translateX(-50%);
+			}
+
+			.vcol {
+				display: grid;
+				gap: 6px;
+			}
+			.row {
+				display: grid;
+				grid-template-columns: minmax(70px, 90px) 1fr;
+				gap: 8px;
+				align-items: center;
+			}
+			.row label {
+				color: var(--muted);
+				font-size: 12px;
+			}
+			.row select,
+			.row input[type='range'] {
+				width: 100%;
+				background: #0f1324;
+				color: #e6e8f1;
+				border: 1px solid #273051;
+				border-radius: 8px;
+				padding: 6px 8px;
+				font-size: 12px;
+			}
+			.row input[type='range'] {
+				padding: 0;
+				accent-color: var(--accent);
+				background: transparent;
+				border: 0;
+			}
+
+			input[type='range'] {
+				width: 100%;
+				accent-color: var(--accent);
+			}
+
+			.del,
+			.mute,
+			.solo,
+			.play {
+				border: 0;
+				background: #2a2f48;
+				color: #d7e3ff;
+				border-radius: 10px;
+				width: 42px;
+				height: 42px;
+				font-size: 18px;
+				cursor: pointer;
+				transition: background 0.2s ease, transform 0.04s ease;
+			}
+			.del {
+				color: #ffb4b4;
+			}
+			.del:hover,
+			.mute:hover,
+			.solo:hover,
+			.play:hover {
+				background: #353b5a;
+			}
+			.del:active,
+			.mute:active,
+			.solo:active,
+			.play:active {
+				transform: translateY(1px);
+			}
+			.mute.active {
+				color: #ffd28b;
+				background: #3b415f;
+			}
+			.solo.active {
+				color: #a8ffcb;
+				background: #3b415f;
+			}
+
+			@media (max-width: 700px) {
+				.controls {
+					grid-template-columns: 1fr;
+				}
+				.sample {
+					grid-template-columns: 1fr 1fr 42px 42px 42px 42px;
+				}
+			}
+
+			.scope {
+				display: none;
+				margin-top: 10px;
+				background: #0a0d18;
+				border: 1px solid #252a40;
+				border-radius: 12px;
+				width: 100%;
+				height: 140px;
+			}
+			.scope.active {
+				display: block;
+			}
+
+			.footer {
+				margin-top: 18px;
+				color: var(--muted);
+				font-size: 12px;
+				text-align: center;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="wrap">
+			<h1>Simple Audio Looper</h1>
+			<div class="panel">
+				<div class="controls">
+					<button id="recToggleBtn" class="btn record" aria-pressed="false">
+						● Record
+					</button>
+					<button id="haltBtn" class="btn halt" disabled>
+						⏹ Stop Playback
+					</button>
+					<button id="mixRecBtn" class="btn record" aria-pressed="false">
+						⏺ Record Mix
+					</button>
+				</div>
+				<div id="status" class="status">Ready.</div>
+				<canvas id="scope" class="scope" aria-hidden="true"></canvas>
+				<div id="samples" class="samples" aria-live="polite"></div>
+			</div>
+			<div class="footer">
+				Space: Mic Record • Shift+Space: Stop/Resume • Tip: adjust levels with
+				the sliders; click ✕ to remove a loop.
+			</div>
+		</div>
+
+		<script>
+			'use strict';
+
+			/* ================= Core audio + recorder ================= */
+			let audioCtx = null,
+				masterGain = null;
+			let mediaStream = null,
+				mediaRecorder = null,
+				recordingChunks = [];
+			let loopCounter = 0;
+
+			let micSource = null,
+				analyser = null,
+				scopeRAF = null,
+				scopeData = null,
+				isDrawing = false;
+			let recStartPerf = 0; // 0-based scope timer
+
+			/* Bar / transport */
+			let masterLenSec = null;
+			let transportStartTime = null;
+			let lastBarScheduled = -1;
+			let schedulerTimer = null;
+			const SCHEDULE_AHEAD = 0.25;
+			const SCHED_INTERVAL_MS = 50;
+
+			let mixDest = null,
+				mixMR = null,
+				mixChunks = [],
+				mixRecording = false;
+
+			/** Each loop:
+			 * { id, buffer, gainNode, el, userGain, muted, solo,
+			 *   offsetInBar, activeSrc, scheduled, bar,
+			 *   fx:{ type:'none'|'echo'|'reverb', wet:number,
+			 *        dryGain, wetGain, fxIn, delay, fb, convolver }
+			 * }
+			 */
+			const loops = new Map();
+
+			/* UI nodes */
+			const recToggleBtn = document.getElementById('recToggleBtn');
+			const haltBtn = document.getElementById('haltBtn');
+			const mixRecBtn = document.getElementById('mixRecBtn');
+			const statusEl = document.getElementById('status');
+			const samplesEl = document.getElementById('samples');
+			const scopeCanvas = document.getElementById('scope');
+			const scopeCtx = scopeCanvas.getContext('2d');
+
+			const setStatus = (m) => {
+				statusEl.textContent = m;
+			};
+
+			function ensureAudio() {
+				if (!audioCtx) {
+					audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+					masterGain = audioCtx.createGain();
+					masterGain.gain.value = 1.0;
+					masterGain.connect(audioCtx.destination);
+					audioCtx.addEventListener('statechange', () => {
+						updateHaltButtonUI();
+					});
+					haltBtn.disabled = true;
+					updateHaltButtonUI();
+				}
+			}
+
+			/* ===== Mic record ===== */
+			async function getMicStream() {
+				if (mediaStream && mediaStream.active) return mediaStream;
+				try {
+					mediaStream = await navigator.mediaDevices.getUserMedia({
+						audio: {
+							echoCancellation: false,
+							noiseSuppression: false,
+							autoGainControl: false,
+						},
+						video: false,
+					});
+					return mediaStream;
+				} catch (err) {
+					console.error(err);
+					setStatus(
+						'Mic access failed. Please allow permission and try again.'
+					);
+					throw err;
+				}
+			}
+			function pickMimeType() {
+				const c = [
+					'audio/webm;codecs=opus',
+					'audio/ogg;codecs=opus',
+					'audio/webm',
+					'audio/ogg',
+				];
+				for (const t of c) {
+					if (
+						window.MediaRecorder &&
+						MediaRecorder.isTypeSupported &&
+						MediaRecorder.isTypeSupported(t)
+					)
+						return t;
+				}
+				return '';
+			}
+			function decodeSafely(ab) {
+				const copy = ab.slice(0);
+				return new Promise((res, rej) =>
+					audioCtx.decodeAudioData(copy, res, rej)
+				);
+			}
+
+			function ensureAnalyser(stream) {
+				if (!micSource) {
+					micSource = audioCtx.createMediaStreamSource(stream);
+					analyser = audioCtx.createAnalyser();
+					analyser.fftSize = 2048;
+					analyser.smoothingTimeConstant = 0.85;
+					micSource.connect(analyser);
+					scopeData = new Uint8Array(analyser.frequencyBinCount);
+				}
+			}
+			function startScope() {
+				if (!analyser) return;
+				recStartPerf = performance.now();
+				isDrawing = true;
+				scopeCanvas.classList.add('active');
+				scopeCanvas.setAttribute('aria-hidden', 'false');
+				drawScope();
+			}
+			function stopScope() {
+				isDrawing = false;
+				if (scopeRAF) {
+					cancelAnimationFrame(scopeRAF);
+					scopeRAF = null;
+				}
+				try {
+					scopeCtx.clearRect(0, 0, scopeCanvas.width, scopeCanvas.height);
+				} catch (_) {}
+				scopeCanvas.classList.remove('active');
+				scopeCanvas.setAttribute('aria-hidden', 'true');
+			}
+			function fmtTime(secs) {
+				secs = Math.max(0, secs || 0);
+				const m = Math.floor(secs / 60),
+					s = Math.floor(secs % 60),
+					d = Math.floor((secs - Math.floor(secs)) * 10);
+				return `${m}:${String(s).padStart(2, '0')}.${d}`;
+			}
+			function drawScope() {
+				if (!isDrawing || !analyser) return;
+				const dpr = window.devicePixelRatio || 1,
+					cssW = scopeCanvas.clientWidth || 600,
+					cssH = scopeCanvas.clientHeight || 140;
+				if (
+					scopeCanvas.width !== Math.floor(cssW * dpr) ||
+					scopeCanvas.height !== Math.floor(cssH * dpr)
+				) {
+					scopeCanvas.width = Math.floor(cssW * dpr);
+					scopeCanvas.height = Math.floor(cssH * dpr);
+					scopeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+				}
+				analyser.getByteTimeDomainData(scopeData);
+				scopeCtx.clearRect(0, 0, cssW, cssH);
+				scopeCtx.beginPath();
+				const mid = cssH / 2,
+					step = cssW / scopeData.length;
+				for (let i = 0; i < scopeData.length; i++) {
+					const v = (scopeData[i] - 128) / 128;
+					const x = i * step;
+					const y = mid + v * (cssH * 0.45);
+					if (i === 0) scopeCtx.moveTo(x, y);
+					else scopeCtx.lineTo(x, y);
+				}
+				scopeCtx.lineWidth = 2;
+				scopeCtx.strokeStyle = '#79ffe1';
+				scopeCtx.stroke();
+				if (mediaRecorder && mediaRecorder.state === 'recording') {
+					const elapsed = (performance.now() - recStartPerf) / 1000;
+					const text = `REC ${fmtTime(elapsed)}`,
+						pad = 6,
+						h = 22;
+					scopeCtx.font = '13px system-ui,-apple-system,Segoe UI,Roboto,Arial';
+					const w = Math.ceil(scopeCtx.measureText(text).width) + pad * 2;
+					scopeCtx.fillStyle = 'rgba(0,0,0,0.45)';
+					scopeCtx.fillRect(cssW - w - 8, 8, w, h);
+					scopeCtx.fillStyle = '#e6e8f1';
+					scopeCtx.fillText(text, cssW - w - 8 + pad, 8 + 15);
+				}
+				scopeRAF = requestAnimationFrame(drawScope);
+			}
+			window.addEventListener('resize', () => {
+				if (scopeCanvas.classList.contains('active')) drawScope();
+			});
+
+			function updateRecToggleUI(rec) {
+				if (rec) {
+					recToggleBtn.classList.remove('record');
+					recToggleBtn.classList.add('stop');
+					recToggleBtn.textContent = '■ Stop';
+					recToggleBtn.setAttribute('aria-pressed', 'true');
+				} else {
+					recToggleBtn.classList.remove('stop');
+					recToggleBtn.classList.add('record');
+					recToggleBtn.textContent = '● Record';
+					recToggleBtn.setAttribute('aria-pressed', 'false');
+				}
+			}
+			async function startRecording() {
+				ensureAudio();
+				await audioCtx.resume();
+				const stream = await getMicStream();
+				ensureAnalyser(stream);
+				startScope();
+				const opts = {},
+					mt = pickMimeType();
+				if (mt) opts.mimeType = mt;
+				try {
+					mediaRecorder = new MediaRecorder(stream, opts);
+				} catch (e) {
+					console.error(e);
+					setStatus('Recording is not supported in this browser.');
+					return;
+				}
+				recordingChunks = [];
+				mediaRecorder.ondataavailable = (e) => {
+					if (e.data && e.data.size > 0) recordingChunks.push(e.data);
+				};
+				mediaRecorder.onstop = handleRecordingStop;
+				mediaRecorder.start();
+				updateRecToggleUI(true);
+				setStatus('Recording… Press again to stop.');
+			}
+			async function stopRecording() {
+				if (mediaRecorder && mediaRecorder.state === 'recording') {
+					stopScope();
+					mediaRecorder.stop();
+					setStatus('Processing…');
+				}
+			}
+			async function toggleRecording() {
+				if (mediaRecorder && mediaRecorder.state === 'recording')
+					await stopRecording();
+				else await startRecording();
+			}
+
+			/* ===== Solo / mute ===== */
+			function anySoloActive() {
+				for (const [, it] of loops) {
+					if (it.solo) return true;
+				}
+				return false;
+			}
+			function effectiveGain(g, muted, solo, anySolo) {
+				if (anySolo) return solo ? g : 0;
+				return muted ? 0 : g;
+			}
+			function applyGain(it) {
+				if (!it || !it.gainNode) return;
+				const ug = it.userGain ?? 1;
+				it.gainNode.gain.value = effectiveGain(
+					ug,
+					!!it.muted,
+					!!it.solo,
+					anySoloActive()
+				);
+			}
+			function updateAllGains() {
+				for (const [, it] of loops) applyGain(it);
+			}
+
+			/* ===== Grid helpers ===== */
+			function padToMultiple(buf, baseSec, ctx = audioCtx) {
+				const rate = buf.sampleRate,
+					base = Math.max(1, Math.round(baseSec * rate)),
+					cur = buf.length;
+				const multiple = Math.max(1, Math.ceil(cur / base)),
+					newLen = multiple * base;
+				if (newLen === cur) return buf;
+				const out = ctx.createBuffer(buf.numberOfChannels, newLen, rate);
+				for (let ch = 0; ch < buf.numberOfChannels; ch++)
+					out.getChannelData(ch).set(buf.getChannelData(ch));
+				return out;
+			}
+			function nextGridTime(now) {
+				if (transportStartTime == null || masterLenSec == null)
+					return now + 0.05;
+				const look = 0.05,
+					elapsed = now - transportStartTime;
+				if (elapsed < -0.001) return transportStartTime + 0.05;
+				const cycles = Math.ceil((elapsed + look) / masterLenSec);
+				return transportStartTime + cycles * masterLenSec;
+			}
+			async function resampleToContext(buffer, targetRate) {
+				if (!buffer || buffer.sampleRate === targetRate) return buffer;
+				const off = new OfflineAudioContext(
+					buffer.numberOfChannels,
+					Math.ceil(buffer.duration * targetRate),
+					targetRate
+				);
+				const src = off.createBufferSource();
+				src.buffer = buffer;
+				src.connect(off.destination);
+				src.start(0);
+				return await off.startRendering();
+			}
+
+			/* ===== Scheduler (one-shots per bar) ===== */
+			function startScheduler() {
+				if (!schedulerTimer)
+					schedulerTimer = setInterval(schedulerTick, SCHED_INTERVAL_MS);
+			}
+			function stopScheduler() {
+				if (schedulerTimer) {
+					clearInterval(schedulerTimer);
+					schedulerTimer = null;
+				}
+			}
+			function schedulerTick() {
+				if (
+					!audioCtx ||
+					audioCtx.state !== 'running' ||
+					transportStartTime == null ||
+					masterLenSec == null
+				)
+					return;
+				const now = audioCtx.currentTime,
+					horizon = now + SCHEDULE_AHEAD;
+				while (
+					transportStartTime + (lastBarScheduled + 1) * masterLenSec <
+					horizon
+				) {
+					const idx = lastBarScheduled + 1;
+					const barStart = transportStartTime + idx * masterLenSec;
+					scheduleBarAt(barStart);
+					lastBarScheduled = idx;
+				}
+			}
+			function scheduleBarAt(barStart) {
+				for (const [, it] of loops) {
+					const offset = clamp01(it.offsetInBar / masterLenSec) * masterLenSec;
+					const playLen = Math.min(
+						it.buffer.duration,
+						Math.max(0, masterLenSec - offset)
+					);
+					const startAt = barStart + offset;
+					const stopAt = startAt + playLen;
+
+					const src = audioCtx.createBufferSource();
+					src.buffer = it.buffer;
+					src.loop = false;
+
+					// Route through FX: dry + fx
+					src.connect(it.fx.dryGain);
+					src.connect(it.fx.fxIn);
+
+					src.start(startAt, 0, playLen);
+					try {
+						src.stop(stopAt);
+					} catch (_) {}
+
+					if (!it.scheduled) it.scheduled = new Map();
+					it.scheduled.set(barStart, src);
+					src.onended = () => {
+						if (it.scheduled.get(barStart) === src)
+							it.scheduled.delete(barStart);
+						if (it.activeSrc === src) it.activeSrc = null;
+					};
+
+					const msUntil = Math.max(
+						0,
+						Math.round((startAt - audioCtx.currentTime) * 1000)
+					);
+					setTimeout(() => {
+						it.activeSrc = src;
+					}, msUntil);
+				}
+			}
+			function clamp01(x) {
+				return Math.max(0, Math.min(1, x));
+			}
+			function barInfoAt(t) {
+				const idx = Math.floor((t - transportStartTime) / masterLenSec);
+				const barStart = transportStartTime + idx * masterLenSec;
+				const posInBar = t - barStart;
+				return { idx, barStart, posInBar };
+			}
+
+			/* ===== FX helpers ===== */
+			function generateImpulse(ctx, seconds = 2.2, decay = 2.5) {
+				const rate = ctx.sampleRate | 0;
+				const len = Math.max(1, Math.floor(seconds * rate));
+				const buf = ctx.createBuffer(2, len, rate);
+				for (let ch = 0; ch < 2; ch++) {
+					const data = buf.getChannelData(ch);
+					for (let i = 0; i < len; i++) {
+						const t = i / len;
+						data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+					}
+				}
+				return buf;
+			}
+			function createFxFor(item) {
+				const dryGain = audioCtx.createGain();
+				dryGain.connect(item.gainNode);
+				const wetGain = audioCtx.createGain();
+				wetGain.gain.value = 0;
+				wetGain.connect(item.gainNode);
+
+				const fxIn = audioCtx.createGain();
+
+				// Echo: delay + feedback loop
+				const delay = audioCtx.createDelay(1.0);
+				delay.delayTime.value = 0.25;
+				const fb = audioCtx.createGain();
+				fb.gain.value = 0.35;
+				fxIn.connect(delay);
+				delay.connect(fb);
+				fb.connect(delay);
+
+				// Reverb
+				const convolver = audioCtx.createConvolver();
+				convolver.normalize = true;
+				convolver.buffer = generateImpulse(audioCtx, 2.2, 2.6);
+				fxIn.connect(convolver);
+
+				// By default, no effect is routed to wet
+				const fx = {
+					type: 'none',
+					wet: 0,
+					dryGain,
+					wetGain,
+					fxIn,
+					delay,
+					fb,
+					convolver,
+				};
+				// Connect chosen effect output to wetGain
+				fx.applyType = (type) => {
+					fx.type = type;
+					try {
+						delay.disconnect(wetGain);
+					} catch (_) {}
+					try {
+						convolver.disconnect(wetGain);
+					} catch (_) {}
+					if (type === 'echo') {
+						delay.connect(wetGain);
+					} else if (type === 'reverb') {
+						convolver.connect(wetGain);
+					}
+					// type 'none' leaves wet path silent
+				};
+				fx.applyWet = (wet) => {
+					fx.wet = wet;
+					dryGain.gain.value = 1 - wet;
+					wetGain.gain.value = wet;
+				};
+				// default
+				fx.applyType('none');
+				fx.applyWet(0);
+				return fx;
+			}
+
+			/* ===== Loop creation ===== */
+			function makeLoopNodes(buffer) {
+				const id = `loop-${++loopCounter}`;
+				const gainNode = audioCtx.createGain();
+				gainNode.gain.value = 1.0;
+				gainNode.connect(masterGain);
+				const el = renderSampleItem({ id, duration: buffer.duration });
+
+				const item = {
+					id,
+					buffer,
+					gainNode,
+					el,
+					userGain: 1.0,
+					muted: false,
+					solo: false,
+					offsetInBar: 0,
+					activeSrc: null,
+					scheduled: new Map(),
+					bar: null,
+					fx: null,
+				};
+				item.fx = createFxFor(item); // build FX nodes
+				return item;
+			}
+			async function addLoop(buffer) {
+				buffer = await resampleToContext(buffer, audioCtx.sampleRate);
+
+				if (masterLenSec == null) {
+					masterLenSec = buffer.duration;
+					buffer = padToMultiple(buffer, masterLenSec);
+					ensureAudio();
+					transportStartTime = audioCtx.currentTime + 0.2;
+					const node = makeLoopNodes(buffer);
+					node.buffer = buffer;
+					loops.set(node.id, node);
+					lastBarScheduled = -1;
+					startScheduler();
+					haltBtn.disabled = false;
+					updateHaltButtonUI();
+					setStatus('First loop set as master bar. New loops align to it.');
+				} else {
+					buffer = padToMultiple(buffer, masterLenSec);
+					ensureAudio();
+					const node = makeLoopNodes(buffer);
+					node.buffer = buffer;
+					loops.set(node.id, node);
+					setStatus('Loop added. It will align to the master bar.');
+				}
+
+				updateSoloButtonsUI();
+				updateAllGains();
+			}
+			async function handleRecordingStop() {
+				try {
+					const blob = new Blob(recordingChunks, {
+						type: mediaRecorder.mimeType || 'audio/webm',
+					});
+					const ab = await blob.arrayBuffer();
+					const buffer = await decodeSafely(ab);
+					await addLoop(buffer);
+				} catch (err) {
+					console.error(err);
+					setStatus('Could not decode audio. Please try another recording.');
+				} finally {
+					updateRecToggleUI(false);
+				}
+			}
+
+			/* ===== Row UI (bar, level, FX, buttons) ===== */
+			function renderSampleItem({ id, duration }) {
+				const row = document.createElement('div');
+				row.className = 'sample';
+				row.id = id;
+
+				const name = document.createElement('div');
+				name.className = 'name';
+				name.textContent = `Sample ${id.split('-')[1]}`;
+				const info = document.createElement('div');
+				info.className = 'info';
+				info.textContent = `${duration.toFixed(2)} s loop`;
+
+				const progWrap = document.createElement('div');
+				progWrap.className = 'progWrap';
+				const prog = document.createElement('div');
+				prog.className = 'prog';
+				prog.setAttribute('aria-label', 'Time shift / progress');
+				prog.tabIndex = 0;
+				const fill = document.createElement('div');
+				fill.className = 'fill';
+				const handle = document.createElement('div');
+				handle.className = 'handle';
+				prog.appendChild(fill);
+				prog.appendChild(handle);
+				progWrap.appendChild(prog);
+
+				const labelCol = document.createElement('div');
+				labelCol.appendChild(name);
+				labelCol.appendChild(info);
+				labelCol.appendChild(progWrap);
+
+				const vcol = document.createElement('div');
+				vcol.className = 'vcol';
+				// Level
+				const levelRow = document.createElement('div');
+				levelRow.className = 'row';
+				const levelLabel = document.createElement('label');
+				levelLabel.textContent = 'Level';
+				const levelSlider = document.createElement('input');
+				levelSlider.type = 'range';
+				levelSlider.min = '0';
+				levelSlider.max = '100';
+				levelSlider.value = '100';
+				levelSlider.setAttribute('aria-label', 'Level');
+				levelRow.appendChild(levelLabel);
+				levelRow.appendChild(levelSlider);
+				// FX type
+				const fxRow = document.createElement('div');
+				fxRow.className = 'row';
+				const fxLabel = document.createElement('label');
+				fxLabel.textContent = 'FX';
+				const fxSelect = document.createElement('select');
+				['None', 'Echo', 'Reverb'].forEach((n, i) => {
+					const opt = document.createElement('option');
+					opt.value = n.toLowerCase();
+					opt.textContent = n;
+					fxSelect.appendChild(opt);
+				});
+				fxRow.appendChild(fxLabel);
+				fxRow.appendChild(fxSelect);
+				// Wet
+				const wetRow = document.createElement('div');
+				wetRow.className = 'row';
+				const wetLabel = document.createElement('label');
+				wetLabel.textContent = 'Wet';
+				const wetSlider = document.createElement('input');
+				wetSlider.type = 'range';
+				wetSlider.min = '0';
+				wetSlider.max = '100';
+				wetSlider.value = '0';
+				wetSlider.setAttribute('aria-label', 'Wet mix');
+				wetRow.appendChild(wetLabel);
+				wetRow.appendChild(wetSlider);
+
+				vcol.appendChild(levelRow);
+				vcol.appendChild(fxRow);
+				vcol.appendChild(wetRow);
+
+				const play = document.createElement('button');
+				play.className = 'play';
+				play.title = 'Play now';
+				play.setAttribute('aria-label', 'Play now');
+				play.textContent = '▶';
+				const mute = document.createElement('button');
+				mute.className = 'mute';
+				mute.title = 'Mute/unmute';
+				mute.setAttribute('aria-pressed', 'false');
+				mute.textContent = '🔈';
+				const solo = document.createElement('button');
+				solo.className = 'solo';
+				solo.title = 'Solo';
+				solo.setAttribute('aria-pressed', 'false');
+				solo.textContent = '🎧';
+				const del = document.createElement('button');
+				del.className = 'del';
+				del.title = 'Delete loop';
+				del.setAttribute('aria-label', 'Delete loop');
+				del.textContent = '✕';
+
+				row.appendChild(labelCol);
+				row.appendChild(vcol);
+				row.appendChild(play);
+				row.appendChild(mute);
+				row.appendChild(solo);
+				row.appendChild(del);
+				samplesEl.appendChild(row);
+
+				// Wire controls
+				levelSlider.addEventListener('input', () => {
+					const it = loops.get(id);
+					if (it) {
+						it.userGain = parseInt(levelSlider.value, 10) / 100;
+						applyGain(it);
+					}
+				});
+				fxSelect.addEventListener('change', () => {
+					const it = loops.get(id);
+					if (!it) return;
+					it.fx.applyType(fxSelect.value);
+					setStatus(
+						`FX set to ${fxSelect.options[fxSelect.selectedIndex].text}.`
+					);
+				});
+				wetSlider.addEventListener('input', () => {
+					const it = loops.get(id);
+					if (!it) return;
+					it.fx.applyWet(parseInt(wetSlider.value, 10) / 100);
+				});
+
+				play.addEventListener('click', () => playRestart(id));
+				mute.addEventListener('click', () => {
+					const it = loops.get(id);
+					if (!it) return;
+					it.muted = !it.muted;
+					mute.classList.toggle('active', it.muted);
+					mute.setAttribute('aria-pressed', String(it.muted));
+					mute.textContent = it.muted ? '🔇' : '🔈';
+					updateAllGains();
+				});
+				solo.addEventListener('click', () => toggleSolo(id));
+				del.addEventListener('click', () => removeLoop(id));
+
+				// --- Drag to set offset within the master bar ---
+				function pxToOffset(clientX) {
+					const it = loops.get(id);
+					if (!it || masterLenSec == null) return 0;
+					const r = prog.getBoundingClientRect();
+					const frac = Math.min(
+						1,
+						Math.max(0, (clientX - r.left) / Math.max(1, r.width))
+					);
+					return frac * masterLenSec;
+				}
+				function setHandle(it) {
+					if (!it || !it.bar || masterLenSec == null) return;
+					const frac = it.offsetInBar / masterLenSec;
+					it.bar.handle.style.left = `${frac * 100}%`;
+				}
+				function dragAt(clientX) {
+					const it = loops.get(id);
+					if (!it) return;
+					it.offsetInBar = pxToOffset(clientX);
+					setHandle(it);
+					updateFillUI(it, audioCtx ? audioCtx.currentTime : 0);
+				}
+				let dragging = false;
+				function onDown(e) {
+					dragging = true;
+					if (e.pointerId != null) prog.setPointerCapture(e.pointerId);
+					e.preventDefault();
+					dragAt(e.clientX);
+				}
+				function onMove(e) {
+					if (!dragging) return;
+					dragAt(e.clientX);
+				}
+				function onUp(e) {
+					if (!dragging) return;
+					dragging = false;
+					try {
+						if (e.pointerId != null) prog.releasePointerCapture(e.pointerId);
+					} catch (_) {}
+					const it = loops.get(id);
+					if (!it || transportStartTime == null || masterLenSec == null) return;
+
+					const now = audioCtx ? audioCtx.currentTime : 0;
+					const { barStart, posInBar } = barInfoAt(now);
+					const pending = it.scheduled && it.scheduled.get(barStart);
+					if (pending) {
+						try {
+							pending.stop(0);
+						} catch (_) {}
+						it.scheduled.delete(barStart);
+					}
+					if (posInBar < it.offsetInBar) {
+						const playLen = Math.min(
+							it.buffer.duration,
+							Math.max(0, masterLenSec - it.offsetInBar)
+						);
+						const startAt = barStart + it.offsetInBar;
+						const stopAt = startAt + playLen;
+						if (it.activeSrc) {
+							try {
+								it.activeSrc.stop(0);
+							} catch (_) {}
+							it.activeSrc = null;
+						}
+						const src = audioCtx.createBufferSource();
+						src.buffer = it.buffer;
+						src.loop = false;
+						src.connect(it.fx.dryGain);
+						src.connect(it.fx.fxIn);
+						src.start(startAt, 0, playLen);
+						try {
+							src.stop(stopAt);
+						} catch (_) {}
+						if (!it.scheduled) it.scheduled = new Map();
+						it.scheduled.set(barStart, src);
+						src.onended = () => {
+							if (it.scheduled.get(barStart) === src)
+								it.scheduled.delete(barStart);
+							if (it.activeSrc === src) it.activeSrc = null;
+						};
+					}
+					setStatus(
+						`Shifted Sample ${id.split('-')[1]} to ${it.offsetInBar.toFixed(
+							2
+						)}s of the bar.`
+					);
+				}
+				prog.addEventListener('pointerdown', onDown);
+				prog.addEventListener('pointermove', onMove);
+				prog.addEventListener('pointerup', onUp);
+				prog.addEventListener('pointercancel', onUp);
+				handle.addEventListener('pointerdown', onDown);
+
+				// mouse fallback
+				prog.addEventListener('mousedown', (e) => {
+					onDown(e);
+					const mm = (ev) => onMove(ev);
+					const mu = (ev) => {
+						document.removeEventListener('mousemove', mm);
+						document.removeEventListener('mouseup', mu);
+						onUp(ev);
+					};
+					document.addEventListener('mousemove', mm);
+					document.addEventListener('mouseup', mu, { once: true });
+				});
+
+				// attach bar refs
+				queueMicrotask(() => {
+					const it = loops.get(id);
+					if (it) {
+						it.bar = { wrap: prog, fill, handle };
+						setHandle(it);
+					}
+				});
+
+				return row;
+			}
+
+			/* Progress bar drawing for one master bar */
+			function updateFillUI(it, now) {
+				if (
+					!it ||
+					!it.bar ||
+					transportStartTime == null ||
+					masterLenSec == null
+				)
+					return;
+				const idx = Math.floor((now - transportStartTime) / masterLenSec);
+				const barStart = transportStartTime + idx * masterLenSec;
+				const posInBar = now - barStart;
+				const offset = it.offsetInBar;
+				const playLen = Math.min(
+					it.buffer.duration,
+					Math.max(0, masterLenSec - offset)
+				);
+				const leftFrac = offset / masterLenSec;
+
+				let width = 0;
+				if (posInBar > offset) width = Math.min(playLen, posInBar - offset);
+				const widthFrac = width / masterLenSec;
+
+				it.bar.fill.style.left = `${leftFrac * 100}%`;
+				it.bar.fill.style.width = `${
+					Math.max(0, Math.min(1, widthFrac)) * 100
+				}%`;
+			}
+
+			/* Play now (restart within this bar, truncating at bar end) */
+			function playRestart(id) {
+				const it = loops.get(id);
+				if (
+					!it ||
+					!audioCtx ||
+					transportStartTime == null ||
+					masterLenSec == null
+				)
+					return;
+				const now = audioCtx.currentTime;
+				const idx = Math.floor((now - transportStartTime) / masterLenSec);
+				const barStart = transportStartTime + idx * masterLenSec;
+				const posInBar = now - barStart;
+				const remain = Math.max(0, masterLenSec - posInBar);
+				const dur = Math.min(it.buffer.duration, remain);
+
+				if (it.activeSrc) {
+					try {
+						it.activeSrc.stop(0);
+					} catch (_) {}
+					it.activeSrc = null;
+				}
+				const pending = it.scheduled && it.scheduled.get(barStart);
+				if (pending) {
+					try {
+						pending.stop(0);
+					} catch (_) {}
+					it.scheduled.delete(barStart);
+				}
+
+				const src = audioCtx.createBufferSource();
+				src.buffer = it.buffer;
+				src.loop = false;
+				src.connect(it.fx.dryGain);
+				src.connect(it.fx.fxIn);
+				src.start(now, 0, dur);
+				try {
+					src.stop(now + dur);
+				} catch (_) {}
+				it.activeSrc = src;
+			}
+
+			/* Solo helpers */
+			function toggleSolo(id) {
+				const cur = loops.get(id);
+				if (!cur) return;
+				const enable = !cur.solo;
+				for (const [, it] of loops) it.solo = enable ? it.id === id : false;
+				updateSoloButtonsUI();
+				updateAllGains();
+			}
+			function updateSoloButtonsUI() {
+				for (const [, it] of loops) {
+					const row = document.getElementById(it.id);
+					if (!row) continue;
+					const b = row.querySelector('.solo');
+					if (!b) continue;
+					b.classList.toggle('active', !!it.solo);
+					b.setAttribute('aria-pressed', String(!!it.solo));
+				}
+			}
+
+			/* Remove loop */
+			function removeLoop(id) {
+				const it = loops.get(id);
+				if (!it) return;
+				if (it.activeSrc) {
+					try {
+						it.activeSrc.stop(0);
+					} catch (_) {}
+					it.activeSrc = null;
+				}
+				if (it.scheduled) {
+					for (const [, s] of it.scheduled) {
+						try {
+							s.stop(0);
+						} catch (_) {}
+					}
+					it.scheduled.clear();
+				}
+				try {
+					it.gainNode.disconnect();
+				} catch (_) {}
+				if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el);
+				loops.delete(id);
+				setStatus('Loop removed.');
+			}
+
+			/* Halt / Resume */
+			function updateHaltButtonUI() {
+				haltBtn.textContent =
+					audioCtx && audioCtx.state === 'running'
+						? '⏹ Stop Playback'
+						: '▶ Resume Playback';
+			}
+			haltBtn.addEventListener('click', async () => {
+				ensureAudio();
+				if (!transportStartTime) {
+					setStatus('Nothing to play yet. Record a loop first.');
+					return;
+				}
+				if (audioCtx.state === 'running') {
+					masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.01);
+					await audioCtx.suspend();
+					updateHaltButtonUI();
+					setStatus('Playback suspended.');
+				} else {
+					await audioCtx.resume();
+					masterGain.gain.setTargetAtTime(1, audioCtx.currentTime, 0.01);
+					updateHaltButtonUI();
+					setStatus('Playback resumed.');
+				}
+			});
+
+			/* Mix recorder (auto WAV) */
+			function ensureMixStream() {
+				if (!audioCtx) return;
+				if (!mixDest) {
+					mixDest = audioCtx.createMediaStreamDestination();
+					masterGain.connect(mixDest);
+				}
+			}
+			function bufferToInterleavedFloat32(buf) {
+				const ch = buf.numberOfChannels | 0,
+					frames = buf.length | 0;
+				const out = new Float32Array(frames * ch);
+				for (let i = 0; i < frames; i++)
+					for (let c = 0; c < ch; c++)
+						out[i * ch + c] = buf.getChannelData(c)[i] || 0;
+				return out;
+			}
+			function floatTo16PCM(float32) {
+				const dv = new DataView(new ArrayBuffer(float32.length * 2));
+				let off = 0;
+				for (let i = 0; i < float32.length; i++) {
+					let s = Math.max(-1, Math.min(1, float32[i]));
+					dv.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+					off += 2;
+				}
+				return dv.buffer;
+			}
+			function createWavFromBuffer(buf) {
+				const inter = bufferToInterleavedFloat32(buf);
+				const sr = buf.sampleRate | 0;
+				const ch = buf.numberOfChannels | 0;
+				const bps = 2,
+					blockAlign = ch * bps,
+					byteRate = sr * blockAlign,
+					dataBytes = inter.length * bps;
+				const header = new ArrayBuffer(44);
+				const dv = new DataView(header);
+				let p = 0;
+				const ws = (s) => {
+					for (let i = 0; i < s.length; i++) dv.setUint8(p++, s.charCodeAt(i));
+				};
+				const w32 = (v) => {
+					dv.setUint32(p, v, true);
+					p += 4;
+				};
+				const w16 = (v) => {
+					dv.setUint16(p, v, true);
+					p += 2;
+				};
+				ws('RIFF');
+				w32(36 + dataBytes);
+				ws('WAVE');
+				ws('fmt ');
+				w32(16);
+				w16(1);
+				w16(ch);
+				w32(sr);
+				w32(byteRate);
+				w16(blockAlign);
+				w16(bps * 8);
+				ws('data');
+				w32(dataBytes);
+				const pcm = floatTo16PCM(inter);
+				return new Blob([header, pcm], { type: 'audio/wav' });
+			}
+			function pickMixMimeType() {
+				const c = [
+					'audio/webm;codecs=opus',
+					'audio/webm',
+					'audio/ogg;codecs=opus',
+					'audio/ogg',
+				];
+				for (const t of c) {
+					if (
+						window.MediaRecorder &&
+						MediaRecorder.isTypeSupported &&
+						MediaRecorder.isTypeSupported(t)
+					)
+						return t;
+				}
+				return '';
+			}
+			function updateMixRecUI(rec) {
+				if (rec) {
+					mixRecBtn.classList.remove('record');
+					mixRecBtn.classList.add('stop');
+					mixRecBtn.textContent = '■ Stop Mix';
+					mixRecBtn.setAttribute('aria-pressed', 'true');
+				} else {
+					mixRecBtn.classList.remove('stop');
+					mixRecBtn.classList.add('record');
+					mixRecBtn.textContent = '⏺ Record Mix';
+					mixRecBtn.setAttribute('aria-pressed', 'false');
+				}
+			}
+			async function startMixRecording() {
+				ensureAudio();
+				await audioCtx.resume();
+				ensureMixStream();
+				try {
+					const opts = {},
+						mt = pickMixMimeType();
+					if (mt) opts.mimeType = mt;
+					mixChunks = [];
+					mixMR = new MediaRecorder(mixDest.stream, opts);
+					mixMR.ondataavailable = (e) => {
+						if (e.data && e.data.size > 0) mixChunks.push(e.data);
+					};
+					mixMR.onstop = async () => {
+						try {
+							const blob = new Blob(mixChunks, {
+								type: mixMR.mimeType || 'audio/webm',
+							});
+							const ab = await blob.arrayBuffer();
+							const buf = await decodeSafely(ab);
+							const wav = createWavFromBuffer(buf);
+							const url = URL.createObjectURL(wav);
+							const a = document.createElement('a');
+							a.href = url;
+							a.download = `mix_${Date.now()}.wav`;
+							document.body.appendChild(a);
+							a.click();
+							a.remove();
+							setTimeout(() => URL.revokeObjectURL(url), 4000);
+							setStatus(
+								`Mix captured: ${buf.duration.toFixed(2)} s @ ${
+									buf.sampleRate
+								} Hz.`
+							);
+						} catch (err) {
+							console.error(err);
+							setStatus('Failed to build WAV from mix.');
+						} finally {
+							updateMixRecUI(false);
+							mixRecording = false;
+						}
+					};
+					mixMR.start();
+					updateMixRecUI(true);
+					mixRecording = true;
+					setStatus(
+						'Recording mix… Press again to stop (WAV will auto-download).'
+					);
+				} catch (e) {
+					console.error(e);
+					setStatus('Could not start mix recording in this browser.');
+					updateMixRecUI(false);
+					mixRecording = false;
+				}
+			}
+			async function stopMixRecording() {
+				if (mixRecording && mixMR) {
+					try {
+						mixMR.stop();
+					} catch (_) {}
+				}
+			}
+			function toggleMixRecording() {
+				if (!mixRecording) startMixRecording();
+				else stopMixRecording();
+			}
+			mixRecBtn.addEventListener('click', toggleMixRecording);
+
+			/* ===== UI ticker ===== */
+			let uiRAF = null,
+				frozenNow = 0;
+			function ensureUiTicker() {
+				if (!uiRAF) uiRAF = requestAnimationFrame(updateBars);
+			}
+			function updateBars() {
+				const running = !!audioCtx && audioCtx.state === 'running';
+				const now = running ? audioCtx.currentTime : frozenNow;
+				for (const [, it] of loops) {
+					updateFillUI(it, now);
+				}
+				uiRAF = requestAnimationFrame(updateBars);
+			}
+
+			/* ===== Keyboard ===== */
+			function isInteractive(el) {
+				if (!el) return false;
+				const t = el.tagName ? el.tagName.toLowerCase() : '';
+				return (
+					el.isContentEditable ||
+					t === 'input' ||
+					t === 'textarea' ||
+					t === 'select' ||
+					t === 'button' ||
+					el.getAttribute('role') === 'button'
+				);
+			}
+			window.addEventListener('keydown', (e) => {
+				const isSpace = e.code === 'Space' || e.key === ' ';
+				if (!isSpace) return;
+				const el = document.activeElement;
+				if (isInteractive(el)) return;
+				e.preventDefault();
+				if (e.shiftKey) haltBtn.click();
+				else toggleRecording();
+			});
+
+			/* ===== Base UI hooks ===== */
+			recToggleBtn.addEventListener('click', () => toggleRecording());
+			window.addEventListener('beforeunload', () => {
+				stopScheduler();
+				for (const [, it] of loops) {
+					if (it.activeSrc) {
+						try {
+							it.activeSrc.stop(0);
+						} catch (_) {}
+					}
+					if (it.scheduled) {
+						for (const [, s] of it.scheduled) {
+							try {
+								s.stop(0);
+							} catch (_) {}
+						}
+					}
+				}
+			});
+
+			/* ===== Self-tests (console) ===== */
+			(async function runSelfTests() {
+				try {
+					console.groupCollapsed('%cLooper self-tests', 'color:#5eead4');
+					// padToMultiple
+					const tmp1 = new OfflineAudioContext(1, 62400, 48000);
+					const buf1 = tmp1.createBuffer(1, 62400, 48000);
+					const padded = padToMultiple(buf1, 0.5, tmp1);
+					console.assert(padded.length === 72000, 'padToMultiple → 72000');
+					// nextGridTime
+					transportStartTime = 100;
+					masterLenSec = 0.5;
+					let t = nextGridTime(100.1);
+					console.assert(Math.abs(t - 100.5) < 1e-6, 'nextGridTime 100.5');
+					t = nextGridTime(100.51);
+					console.assert(Math.abs(t - 101.0) < 1e-6, 'nextGridTime 101.0');
+					console.groupEnd();
+				} catch (e) {
+					console.error('Self-tests failed:', e);
+				} finally {
+					transportStartTime = null;
+					masterLenSec = null;
+					lastBarScheduled = -1;
+				}
+			})();
+
+			/* ===== Recording pipeline hook ===== */
+			async function handleRecordingStopFinalize(buffer) {
+				await addLoop(buffer);
+				ensureUiTicker();
+				startScheduler();
+			}
+			async function handleRecordingStop() {
+				try {
+					const blob = new Blob(recordingChunks, {
+						type: mediaRecorder.mimeType || 'audio/webm',
+					});
+					const ab = await blob.arrayBuffer();
+					const buffer = await decodeSafely(ab);
+					await handleRecordingStopFinalize(buffer);
+				} catch (err) {
+					console.error(err);
+					setStatus('Could not decode audio. Please try another recording.');
+				} finally {
+					updateRecToggleUI(false);
+				}
+			}
+		</script>
+	</body>
 </html>
