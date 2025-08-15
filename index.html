@@ -349,11 +349,14 @@
 			}
 
 			/* FX Modal specifics */
+			/* FX Modal specifics (closer sliders) */
 			.fxlist {
 				display: grid;
-				grid-template-columns: 1fr 140px;
-				gap: 8px 16px;
+				grid-template-columns: auto 160px; /* label sized to content, slider fixed */
+				column-gap: 10px;
+				row-gap: 8px;
 				align-items: center;
+				justify-content: start;
 			}
 			.fxlist .rowfx {
 				display: contents;
@@ -364,18 +367,29 @@
 				gap: 8px;
 				font-size: 14px;
 				color: #e6e8f1;
+				white-space: nowrap; /* keep the label compact */
 			}
 			.fxlist input[type='checkbox'] {
 				width: 16px;
 				height: 16px;
 				accent-color: var(--accent);
 			}
+			/* keep sliders compact so they stay close */
 			.fxlist input[type='range'] {
-				width: 100%;
+				width: 160px;
 				accent-color: var(--accent);
 			}
 			.fxlist .disabled {
-				opacity: 0.5;
+				opacity: 0.6;
+			}
+
+			@media (max-width: 520px) {
+				.fxlist {
+					grid-template-columns: auto 120px;
+				}
+				.fxlist input[type='range'] {
+					width: 120px;
+				}
 			}
 		</style>
 	</head>
