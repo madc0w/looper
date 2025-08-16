@@ -14,7 +14,6 @@
 				--bar: #2a2f48;
 				--barFill: #5eead4;
 				--handle: #a8ffcb;
-				--overlay: rgba(5, 7, 15, 0.65);
 			}
 			* {
 				box-sizing: border-box;
@@ -101,7 +100,7 @@
 			}
 			.sample {
 				display: grid;
-				grid-template-columns: 1fr minmax(260px, 34%) 42px 42px 42px 50px 50px 42px;
+				grid-template-columns: 1fr minmax(220px, 34%) 42px 42px 42px 42px 56px;
 				gap: 10px;
 				align-items: center;
 				background: var(--panel);
@@ -113,19 +112,15 @@
 				font-weight: 600;
 				color: #dbe2ff;
 				font-size: 14px;
-				outline: none;
-			}
-			.sample .name[contenteditable='true'] {
-				background: rgba(94, 234, 212, 0.08);
-				border-radius: 6px;
-				padding: 2px 4px;
+				cursor: text;
 			}
 			.sample .info {
 				color: #9aa0b4;
 				font-size: 12px;
 				margin-bottom: 16px;
-			} /* keeps handle clear */
+			}
 
+			/* progress + handle */
 			.progWrap {
 				display: grid;
 				gap: 6px;
@@ -144,7 +139,7 @@
 				top: 0;
 				height: 100%;
 				left: 0;
-				width: 0%;
+				width: 0;
 				background: var(--barFill);
 				opacity: 0.9;
 			}
@@ -176,13 +171,21 @@
 				color: #9aa0b4;
 				font-size: 12px;
 			}
+			.row select,
 			.row input[type='range'] {
 				width: 100%;
-				background: transparent;
+				background: #0f1324;
 				color: #e6e8f1;
-				border: 0;
+				border: 1px solid #273051;
+				border-radius: 8px;
+				padding: 6px 8px;
+				font-size: 12px;
+			}
+			.row input[type='range'] {
 				padding: 0;
 				accent-color: var(--accent);
+				background: transparent;
+				border: 0;
 			}
 			input[type='range'] {
 				width: 100%;
@@ -193,7 +196,6 @@
 			.mute,
 			.solo,
 			.play,
-			.eqbtn,
 			.fxbtn {
 				border: 0;
 				background: #2a2f48;
@@ -205,12 +207,6 @@
 				cursor: pointer;
 				transition: background 0.2s ease, transform 0.04s ease;
 			}
-			.eqbtn,
-			.fxbtn {
-				width: 50px;
-				font-size: 14px;
-				font-weight: 700;
-			}
 			.del {
 				color: #ffb4b4;
 			}
@@ -218,7 +214,6 @@
 			.mute:hover,
 			.solo:hover,
 			.play:hover,
-			.eqbtn:hover,
 			.fxbtn:hover {
 				background: #353b5a;
 			}
@@ -226,7 +221,6 @@
 			.mute:active,
 			.solo:active,
 			.play:active,
-			.eqbtn:active,
 			.fxbtn:active {
 				transform: translateY(1px);
 			}
@@ -244,7 +238,7 @@
 					grid-template-columns: 1fr;
 				}
 				.sample {
-					grid-template-columns: 1fr 1fr 42px 42px 42px 50px 50px 42px;
+					grid-template-columns: 1fr 1fr 42px 42px 42px 42px 56px;
 				}
 			}
 
@@ -268,128 +262,69 @@
 				text-align: center;
 			}
 
-			/* Modal base */
-			.modalBackdrop {
+			/* ---------- Modal (FX) ---------- */
+			.modal {
 				position: fixed;
 				inset: 0;
-				background: var(--overlay);
+				background: rgba(0, 0, 0, 0.55);
 				display: none;
 				align-items: center;
 				justify-content: center;
-				z-index: 9999;
+				z-index: 1000;
 			}
-			.modal {
-				width: min(680px, 96vw);
-				background: #121629;
-				border: 1px solid #2a3258;
-				border-radius: 14px;
-				box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
-				padding: 16px;
+			.modal.show {
+				display: flex;
 			}
-			.modal h2 {
-				margin: 0 0 10px;
-				font-size: 18px;
+			.card {
+				width: min(760px, 92vw);
+				background: #12162a;
+				border: 1px solid #242a42;
+				border-radius: 12px;
+				box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+				padding: 18px;
 			}
-			.modal button.small {
-				border: 0;
-				border-radius: 8px;
-				padding: 10px 12px;
-				background: #2a2f48;
-				color: #e6e8f1;
-				cursor: pointer;
+			.card h3 {
+				margin: 0 0 12px 0;
+				font-weight: 700;
 			}
-			.modal button.small:hover {
-				background: #353b5a;
+			.fx-list {
+				display: grid;
+				grid-template-columns: 1fr;
+				gap: 12px;
+				margin-top: 8px;
 			}
-			.modal .actions {
+			/* Fixed label column so every slider (right column) has identical width */
+			.fx-row {
+				display: grid;
+				grid-template-columns: 220px 1fr; /* was: auto 1fr */
+				align-items: center;
+				gap: 12px;
+			}
+
+			/* Make sure the sliders actually span the full right column */
+			.fx-row input[type='range'] {
+				width: 100%;
+				margin: 0; /* Firefox can add default margins */
+				accent-color: var(--accent);
+			}
+			.fx-row label {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+			}
+			.modal-actions {
 				display: flex;
 				gap: 10px;
 				justify-content: flex-end;
-				margin-top: 14px;
+				margin-top: 16px;
 			}
-
-			/* EQ Modal specifics */
-			.modal .grid {
-				display: grid;
-				grid-template-columns: repeat(5, 1fr);
-				gap: 14px;
-			}
-			.modal .band {
-				background: #0f1324;
-				border: 1px solid #273051;
-				border-radius: 10px;
-				padding: 12px;
-				display: grid;
-				grid-template-rows: auto 1fr auto;
-				align-items: center;
-				justify-items: center;
-				min-height: 220px;
-			}
-			.modal .band h3 {
-				margin: 0 0 6px;
-				font-size: 13px;
-				color: #cfe4ff;
-				text-align: center;
-			}
-			.vslider {
-				-webkit-appearance: slider-vertical;
-				writing-mode: bt-lr;
-				width: 18px;
-				height: 160px;
-				padding: 0;
-				accent-color: var(--accent);
-				background: transparent;
-				border: 0;
-			}
-			.modal .value {
+			.small {
 				font-size: 12px;
 				color: var(--muted);
-				text-align: center;
-				margin-top: 6px;
+				margin-left: 6px;
 			}
-
-			/* FX Modal specifics */
-			/* FX Modal specifics (closer sliders) */
-			.fxlist {
-				display: grid;
-				grid-template-columns: auto 160px; /* label sized to content, slider fixed */
-				column-gap: 10px;
-				row-gap: 8px;
-				align-items: center;
-				justify-content: start;
-			}
-			.fxlist .rowfx {
-				display: contents;
-			}
-			.fxlist label {
-				display: flex;
-				align-items: center;
-				gap: 8px;
-				font-size: 14px;
-				color: #e6e8f1;
-				white-space: nowrap; /* keep the label compact */
-			}
-			.fxlist input[type='checkbox'] {
-				width: 16px;
-				height: 16px;
-				accent-color: var(--accent);
-			}
-			/* keep sliders compact so they stay close */
-			.fxlist input[type='range'] {
-				width: 160px;
-				accent-color: var(--accent);
-			}
-			.fxlist .disabled {
-				opacity: 0.6;
-			}
-
-			@media (max-width: 520px) {
-				.fxlist {
-					grid-template-columns: auto 120px;
-				}
-				.fxlist input[type='range'] {
-					width: 120px;
-				}
+			.fxbtn {
+				width: 56px;
 			}
 		</style>
 	</head>
@@ -418,147 +353,33 @@
 			</div>
 		</div>
 
-		<!-- EQ Modal -->
-		<div
-			id="eqBackdrop"
-			class="modalBackdrop"
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="eqTitle"
-		>
-			<div class="modal">
-				<h2 id="eqTitle">EQ — <span id="eqTrackName"></span></h2>
-				<div class="grid">
-					<div class="band">
-						<h3>Low<br />(120 Hz)</h3>
-						<input
-							id="eqLow"
-							class="vslider"
-							type="range"
-							min="-12"
-							max="12"
-							step="0.1"
-							value="0"
-						/>
-						<div class="value"><span id="eqLowVal">0.0</span> dB</div>
-					</div>
-					<div class="band">
-						<h3>Low-Mid<br />(350 Hz)</h3>
-						<input
-							id="eqLowMid"
-							class="vslider"
-							type="range"
-							min="-12"
-							max="12"
-							step="0.1"
-							value="0"
-						/>
-						<div class="value"><span id="eqLowMidVal">0.0</span> dB</div>
-					</div>
-					<div class="band">
-						<h3>Mid<br />(1 kHz)</h3>
-						<input
-							id="eqMid"
-							class="vslider"
-							type="range"
-							min="-12"
-							max="12"
-							step="0.1"
-							value="0"
-						/>
-						<div class="value"><span id="eqMidVal">0.0</span> dB</div>
-					</div>
-					<div class="band">
-						<h3>High-Mid<br />(3.5 kHz)</h3>
-						<input
-							id="eqHighMid"
-							class="vslider"
-							type="range"
-							min="-12"
-							max="12"
-							step="0.1"
-							value="0"
-						/>
-						<div class="value"><span id="eqHighMidVal">0.0</span> dB</div>
-					</div>
-					<div class="band">
-						<h3>High<br />(8 kHz)</h3>
-						<input
-							id="eqHigh"
-							class="vslider"
-							type="range"
-							min="-12"
-							max="12"
-							step="0.1"
-							value="0"
-						/>
-						<div class="value"><span id="eqHighVal">0.0</span> dB</div>
-					</div>
+		<!-- FX modal -->
+		<div id="fxModal" class="modal" aria-hidden="true">
+			<div
+				class="card"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="fxTitle"
+			>
+				<h3 id="fxTitle">FX</h3>
+				<div class="fx-list" id="fxList">
+					<!-- rows injected -->
 				</div>
-				<div class="actions">
-					<button id="eqReset" class="small">Reset</button>
-					<button id="eqClose" class="small">Close</button>
-				</div>
-			</div>
-		</div>
-
-		<!-- FX Modal -->
-		<div
-			id="fxBackdrop"
-			class="modalBackdrop"
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="fxTitle"
-		>
-			<div class="modal">
-				<h2 id="fxTitle">FX — <span id="fxTrackName"></span></h2>
-				<div class="fxlist">
-					<!-- Reverse (toggle only) -->
-					<div class="rowfx">
-						<label
-							><input id="fxReverse" type="checkbox" />Reverse (toggle)</label
-						>
-						<div class="disabled">—</div>
-					</div>
-					<!-- Echo -->
-					<div class="rowfx">
-						<label><input id="fxEcho" type="checkbox" />Echo</label>
-						<input id="fxEchoWet" type="range" min="0" max="100" value="0" />
-					</div>
-					<!-- Reverb -->
-					<div class="rowfx">
-						<label><input id="fxReverb" type="checkbox" />Reverb</label>
-						<input id="fxReverbWet" type="range" min="0" max="100" value="0" />
-					</div>
-					<!-- Chorus -->
-					<div class="rowfx">
-						<label><input id="fxChorus" type="checkbox" />Chorus</label>
-						<input id="fxChorusWet" type="range" min="0" max="100" value="0" />
-					</div>
-					<!-- Flanger -->
-					<div class="rowfx">
-						<label><input id="fxFlanger" type="checkbox" />Flanger</label>
-						<input id="fxFlangerWet" type="range" min="0" max="100" value="0" />
-					</div>
-					<!-- Phaser -->
-					<div class="rowfx">
-						<label><input id="fxPhaser" type="checkbox" />Phaser</label>
-						<input id="fxPhaserWet" type="range" min="0" max="100" value="0" />
-					</div>
-					<!-- Compressor -->
-					<div class="rowfx">
-						<label><input id="fxComp" type="checkbox" />Compressor</label>
-						<input id="fxCompWet" type="range" min="0" max="100" value="0" />
-					</div>
-					<!-- Gate / Expander -->
-					<div class="rowfx">
-						<label><input id="fxGate" type="checkbox" />Gate / Expander</label>
-						<input id="fxGateWet" type="range" min="0" max="100" value="0" />
-					</div>
-				</div>
-				<div class="actions">
-					<button id="fxAllOff" class="small">All Off</button>
-					<button id="fxClose" class="small">Close</button>
+				<div class="modal-actions">
+					<button
+						id="fxAllOff"
+						class="btn stop"
+						style="padding: 8px 12px; font-size: 14px"
+					>
+						All Off
+					</button>
+					<button
+						id="fxClose"
+						class="btn record"
+						style="padding: 8px 12px; font-size: 14px"
+					>
+						Close
+					</button>
 				</div>
 			</div>
 		</div>
@@ -566,7 +387,7 @@
 		<script>
 			'use strict';
 
-			/* ========= Core audio ========= */
+			/* ========= Core audio + state ========= */
 			let audioCtx = null,
 				masterGain = null;
 			let mediaStream = null,
@@ -582,11 +403,11 @@
 				isDrawing = false;
 			let recStartPerf = 0;
 
-			/* Transport */
+			/* Transport / bar */
 			let masterLenSec = null;
 			let transportStartTime = null;
 
-			/* Scheduler */
+			/* One-shot scheduler */
 			let schedTimer = null;
 			const SCHEDULE_AHEAD = 0.25;
 			const SCHEDULE_INTERVAL = 50;
@@ -598,11 +419,10 @@
 				mixRecording = false;
 
 			/** loop item:
-			 * { id, displayName, buffer, revBuffer, gainNode, el, userGain, muted, solo,
+			 * { id, buffer, revBuffer, gainNode, el, userGain, muted, solo,
 			 *   offsetInBar, bar:{wrap,fill,handle},
 			 *   periodBars, periodSec, nextStartTime, active:Set,
-			 *   eq:{in, low, lowMid, mid, highMid, high, reset},
-			 *   fx:{...} }
+			 *   fxGraph:{dry,sum,chains,reverse} }
 			 */
 			const loops = new Map();
 
@@ -615,20 +435,28 @@
 			const scopeCanvas = document.getElementById('scope');
 			const scopeCtx = scopeCanvas.getContext('2d');
 
+			/* FX modal DOM */
+			const fxModal = document.getElementById('fxModal');
+			const fxTitle = document.getElementById('fxTitle');
+			const fxListEl = document.getElementById('fxList');
+			const fxCloseBtn = document.getElementById('fxClose');
+			const fxAllOffBtn = document.getElementById('fxAllOff');
+			let fxModalItem = null;
+
 			const setStatus = (m) => (statusEl.textContent = m);
 
 			function ensureAudio() {
 				if (!audioCtx) {
 					audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 					masterGain = audioCtx.createGain();
-					masterGain.gain.value = 1.0;
+					masterGain.gain.value = 1;
 					masterGain.connect(audioCtx.destination);
 					haltBtn.disabled = false;
 					updateHaltButtonUI();
 				}
 			}
 
-			/* ========= Mic recording ========= */
+			/* ========= Mic ========= */
 			async function getMicStream() {
 				if (mediaStream && mediaStream.active) return mediaStream;
 				mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -665,7 +493,7 @@
 				);
 			}
 
-			/* ========= Oscilloscope ========= */
+			/* ========= Scope ========= */
 			function ensureAnalyser(stream) {
 				if (!micSource) {
 					micSource = audioCtx.createMediaStreamSource(stream);
@@ -722,9 +550,9 @@
 				const mid = cssH / 2,
 					step = cssW / scopeData.length;
 				for (let i = 0; i < scopeData.length; i++) {
-					const v = (scopeData[i] - 128) / 128;
-					const x = i * step;
-					const y = mid + v * (cssH * 0.45);
+					const v = (scopeData[i] - 128) / 128,
+						x = i * step,
+						y = mid + v * (cssH * 0.45);
 					if (i === 0) scopeCtx.moveTo(x, y);
 					else scopeCtx.lineTo(x, y);
 				}
@@ -738,7 +566,7 @@
 						h = 22;
 					scopeCtx.font = '13px system-ui,-apple-system,Segoe UI,Roboto,Arial';
 					const w = Math.ceil(scopeCtx.measureText(text).width) + pad * 2;
-					scopeCtx.fillStyle = 'rgba(0,0,0,0.45)';
+					scopeCtx.fillStyle = 'rgba(0,0,0,.45)';
 					scopeCtx.fillRect(cssW - w - 8, 8, w, h);
 					scopeCtx.fillStyle = '#e6e8f1';
 					scopeCtx.fillText(text, cssW - w - 8 + pad, 8 + 15);
@@ -808,20 +636,19 @@
 				s.start(0);
 				return await off.startRendering();
 			}
-			function reverseAudioBuffer(buf) {
-				const out = audioCtx.createBuffer(
-					buf.numberOfChannels,
-					buf.length,
-					buf.sampleRate
-				);
-				for (let ch = 0; ch < buf.numberOfChannels; ch++) {
-					const src = buf.getChannelData(ch),
-						dst = out.getChannelData(ch);
-					for (let i = 0, j = src.length - 1; i < src.length; i++, j--)
-						dst[i] = src[j];
+			function reverseBuffer(ctx, buf) {
+				const ch = buf.numberOfChannels | 0,
+					len = buf.length | 0,
+					out = ctx.createBuffer(ch, len, buf.sampleRate | 0);
+				for (let c = 0; c < ch; c++) {
+					const src = buf.getChannelData(c),
+						dst = out.getChannelData(c);
+					for (let i = 0; i < len; i++) dst[i] = src[len - 1 - i];
 				}
 				return out;
 			}
+
+			/* next aligned start for item */
 			function firstStartAfter(now, item) {
 				const anchor = transportStartTime + item.offsetInBar;
 				if (now <= anchor + 0.01) return anchor;
@@ -829,363 +656,171 @@
 				return anchor + k * item.periodSec;
 			}
 
-			/* ========= 5-band EQ ========= */
-			function createEqFor(item) {
-				const eqIn = audioCtx.createGain();
-				const low = audioCtx.createBiquadFilter();
-				low.type = 'lowshelf';
-				low.frequency.value = 120;
-				low.gain.value = 0;
-				const lowMid = audioCtx.createBiquadFilter();
-				lowMid.type = 'peaking';
-				lowMid.frequency.value = 350;
-				lowMid.Q.value = 1.0;
-				lowMid.gain.value = 0;
-				const mid = audioCtx.createBiquadFilter();
-				mid.type = 'peaking';
-				mid.frequency.value = 1000;
-				mid.Q.value = 1.0;
-				mid.gain.value = 0;
-				const highMid = audioCtx.createBiquadFilter();
-				highMid.type = 'peaking';
-				highMid.frequency.value = 3500;
-				highMid.Q.value = 1.0;
-				highMid.gain.value = 0;
-				const high = audioCtx.createBiquadFilter();
-				high.type = 'highshelf';
-				high.frequency.value = 8000;
-				high.gain.value = 0;
-				eqIn.connect(low);
-				low.connect(lowMid);
-				lowMid.connect(mid);
-				mid.connect(highMid);
-				highMid.connect(high);
-				high.connect(item.gainNode);
-				return {
-					in: eqIn,
-					low,
-					lowMid,
-					mid,
-					highMid,
-					high,
-					reset: () => {
-						low.gain.value = 0;
-						lowMid.gain.value = 0;
-						mid.gain.value = 0;
-						highMid.gain.value = 0;
-						high.gain.value = 0;
-					},
-				};
-			}
-
-			/* ========= FX (multi with per-FX wet) ========= */
-			let gateModuleLoaded = false;
-			async function ensureGateWorklet() {
-				if (gateModuleLoaded) return;
-				const code = `
-          class GateExpanderProcessor extends AudioWorkletProcessor {
-            static get parameterDescriptors() {
-              return [
-                {name:'thresholdDb', defaultValue:-50, minValue:-100, maxValue:0},
-                {name:'ratio', defaultValue:2.0, minValue:1.0, maxValue:20.0},
-                {name:'attack', defaultValue:0.01, minValue:0, maxValue:1},
-                {name:'release', defaultValue:0.15, minValue:0, maxValue:1},
-                {name:'floorDb', defaultValue:-60, minValue:-100, maxValue:0}
-              ];
-            }
-            constructor(){ super(); this.env=0; this.sr=sampleRate; }
-            dbToLin(db){ return Math.pow(10, db/20); }
-            process(inputs, outputs, params){
-              const input=inputs[0], output=outputs[0];
-              if (!input || input.length===0) return true;
-              const thDb=params.thresholdDb[0], ratio=params.ratio[0];
-              const atk=params.attack[0], rel=params.release[0];
-              const floorLin=this.dbToLin(params.floorDb[0]);
-              const aA=Math.exp(-1/(this.sr*Math.max(1e-4,atk)));
-              const aR=Math.exp(-1/(this.sr*Math.max(1e-4,rel)));
-              for (let ch=0; ch<output.length; ch++){
-                const inp=input[ch] || input[0], out=output[ch];
-                if (!inp){ out.fill(0); continue; }
-                for (let i=0;i<inp.length;i++){
-                  const x=inp[i];
-                  const rect=Math.abs(x);
-                  const a = rect>this.env ? aA : aR;
-                  this.env = a*this.env + (1-a)*rect;
-                  const envDb = 20*Math.log10(this.env + 1e-12);
-                  let gain=1.0;
-                  if (envDb < thDb){
-                    const diff = thDb - envDb;
-                    const attDb = -diff*(ratio-1.0);
-                    gain = Math.max(floorLin, this.dbToLin(attDb));
-                  }
-                  out[i]=x*gain;
-                }
-              }
-              return true;
-            }
-          }
-          registerProcessor('gate-expander', GateExpanderProcessor);
-        `;
-				const blob = new Blob([code], { type: 'application/javascript' });
-				const url = URL.createObjectURL(blob);
-				await audioCtx.audioWorklet.addModule(url);
-				URL.revokeObjectURL(url);
-				gateModuleLoaded = true;
-			}
-
-			function createFxFor(item, destNode) {
-				// Dry to EQ input
-				const dry = audioCtx.createGain();
-				dry.gain.value = 1;
-				dry.connect(destNode);
-
-				// A single split point feeding all FX
-				const fxIn = audioCtx.createGain();
-
-				// Wet gains per FX, all go to EQ input (post-mix still passes through EQ)
-				const wetEcho = audioCtx.createGain();
-				wetEcho.gain.value = 0;
-				wetEcho.connect(destNode);
-				const wetReverb = audioCtx.createGain();
-				wetReverb.gain.value = 0;
-				wetReverb.connect(destNode);
-				const wetChorus = audioCtx.createGain();
-				wetChorus.gain.value = 0;
-				wetChorus.connect(destNode);
-				const wetFlanger = audioCtx.createGain();
-				wetFlanger.gain.value = 0;
-				wetFlanger.connect(destNode);
-				const wetPhaser = audioCtx.createGain();
-				wetPhaser.gain.value = 0;
-				wetPhaser.connect(destNode);
-				const wetComp = audioCtx.createGain();
-				wetComp.gain.value = 0;
-				wetComp.connect(destNode);
-				const wetGate = audioCtx.createGain();
-				wetGate.gain.value = 0;
-				wetGate.connect(destNode);
-
-				// Echo
-				const delay = audioCtx.createDelay(1.0);
-				delay.delayTime.value = 0.25;
-				const fb = audioCtx.createGain();
-				fb.gain.value = 0.35;
-				fxIn.connect(delay);
-				delay.connect(fb);
-				fb.connect(delay);
-
-				// Reverb
-				const conv = audioCtx.createConvolver();
-				conv.normalize = true;
-				conv.buffer = (function genIR(ctx, seconds = 2.2, decay = 2.6) {
-					const rate = ctx.sampleRate | 0,
-						len = Math.max(1, Math.floor(seconds * rate));
-					const buf = ctx.createBuffer(2, len, rate);
-					for (let ch = 0; ch < 2; ch++) {
-						const d = buf.getChannelData(ch);
-						for (let i = 0; i < len; i++) {
-							const t = i / len;
-							d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
-						}
-					}
-					return buf;
-				})(audioCtx);
-
-				// Chorus
-				const chorusDelay = audioCtx.createDelay(0.05);
-				chorusDelay.delayTime.value = 0.015;
-				const chorusLFO = audioCtx.createOscillator();
-				chorusLFO.type = 'sine';
-				chorusLFO.frequency.value = 1.2;
-				const chorusDepth = audioCtx.createGain();
-				chorusDepth.gain.value = 0.004;
-				chorusLFO.connect(chorusDepth).connect(chorusDelay.delayTime);
-				chorusLFO.start();
-				fxIn.connect(chorusDelay);
-
-				// Flanger
-				const flangerDelay = audioCtx.createDelay(0.01);
-				flangerDelay.delayTime.value = 0.002;
-				const flangerLFO = audioCtx.createOscillator();
-				flangerLFO.type = 'sine';
-				flangerLFO.frequency.value = 0.25;
-				const flangerDepth = audioCtx.createGain();
-				flangerDepth.gain.value = 0.001;
-				flangerLFO.connect(flangerDepth).connect(flangerDelay.delayTime);
-				flangerLFO.start();
-				const flangerFB = audioCtx.createGain();
-				flangerFB.gain.value = 0.5;
-				fxIn.connect(flangerDelay);
-				flangerDelay.connect(flangerFB);
-				flangerFB.connect(flangerDelay);
-
-				// Phaser
-				const ap1 = audioCtx.createBiquadFilter();
-				ap1.type = 'allpass';
-				ap1.frequency.value = 700;
-				const ap2 = audioCtx.createBiquadFilter();
-				ap2.type = 'allpass';
-				ap2.frequency.value = 1000;
-				const ap3 = audioCtx.createBiquadFilter();
-				ap3.type = 'allpass';
-				ap3.frequency.value = 1400;
-				const ap4 = audioCtx.createBiquadFilter();
-				ap4.type = 'allpass';
-				ap4.frequency.value = 2000;
-				fxIn.connect(ap1);
-				ap1.connect(ap2);
-				ap2.connect(ap3);
-				ap3.connect(ap4);
-				const phaserOut = ap4;
-				const phLFO = audioCtx.createOscillator();
-				phLFO.type = 'sine';
-				phLFO.frequency.value = 0.5;
-				const phDepth = audioCtx.createGain();
-				phDepth.gain.value = 800;
-				phLFO.connect(phDepth);
-				phDepth.connect(ap1.frequency);
-				phDepth.connect(ap2.frequency);
-				phDepth.connect(ap3.frequency);
-				phDepth.connect(ap4.frequency);
-				const phBias = audioCtx.createConstantSource();
-				phBias.offset.value = 0;
-				phBias.start();
-				phLFO.start();
-
-				// Compressor
-				const comp = audioCtx.createDynamicsCompressor();
-				comp.threshold.value = -24;
-				comp.ratio.value = 3;
-				comp.attack.value = 0.01;
-				comp.release.value = 0.18;
-				comp.knee.value = 30;
-				fxIn.connect(comp);
-
-				// Gate / Expander (lazy)
-				let gateNode = null;
-				async function ensureGateNode() {
-					if (!gateNode) {
-						await ensureGateWorklet();
-						gateNode = new AudioWorkletNode(audioCtx, 'gate-expander');
-						gateNode.parameters
-							.get('thresholdDb')
-							.setValueAtTime(-50, audioCtx.currentTime);
-						gateNode.parameters
-							.get('ratio')
-							.setValueAtTime(2.0, audioCtx.currentTime);
-						gateNode.parameters
-							.get('attack')
-							.setValueAtTime(0.01, audioCtx.currentTime);
-						gateNode.parameters
-							.get('release')
-							.setValueAtTime(0.15, audioCtx.currentTime);
-						gateNode.parameters
-							.get('floorDb')
-							.setValueAtTime(-60, audioCtx.currentTime);
-						fxIn.connect(gateNode);
+			/* ========= FX Graph ========= */
+			function generateImpulse(ctx, seconds = 2.2, decay = 2.6) {
+				const rate = ctx.sampleRate | 0,
+					len = Math.max(1, Math.floor(seconds * rate));
+				const buf = ctx.createBuffer(2, len, rate);
+				for (let ch = 0; ch < 2; ch++) {
+					const d = buf.getChannelData(ch);
+					for (let i = 0; i < len; i++) {
+						const t = i / len;
+						d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
 					}
 				}
+				return buf;
+			}
+			function createFxGraph(item) {
+				const sum = audioCtx.createGain();
+				sum.connect(item.gainNode);
+				const dry = audioCtx.createGain();
+				dry.gain.value = 1;
+				dry.connect(sum);
 
-				// Connect helpers
-				const connect = (node, wet) => {
-					try {
-						node.connect(wet);
-					} catch (_) {}
-				};
-				const disconnect = (node, wet) => {
-					try {
-						node.disconnect(wet);
-					} catch (_) {}
-				};
+				function chainEcho() {
+					const input = audioCtx.createGain();
+					const delay = audioCtx.createDelay(1.0);
+					delay.delayTime.value = 0.25;
+					const fb = audioCtx.createGain();
+					fb.gain.value = 0.35;
+					input.connect(delay);
+					delay.connect(fb);
+					fb.connect(delay);
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					delay.connect(wet);
+					wet.connect(sum);
+					return { name: 'Echo', input, wet };
+				}
+				function chainReverb() {
+					const input = audioCtx.createGain();
+					const conv = audioCtx.createConvolver();
+					conv.normalize = true;
+					conv.buffer = generateImpulse(audioCtx, 2.2, 2.6);
+					input.connect(conv);
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					conv.connect(wet);
+					wet.connect(sum);
+					return { name: 'Reverb', input, wet };
+				}
+				function chainChorus() {
+					const input = audioCtx.createGain();
+					const d = audioCtx.createDelay(0.05);
+					d.delayTime.value = 0.02;
+					const lfo = audioCtx.createOscillator();
+					lfo.frequency.value = 1.2;
+					const lfoGain = audioCtx.createGain();
+					lfoGain.gain.value = 0.008;
+					lfo.connect(lfoGain);
+					lfoGain.connect(d.delayTime);
+					lfo.start();
+					input.connect(d);
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					d.connect(wet);
+					wet.connect(sum);
+					return { name: 'Chorus', input, wet, _lfo: lfo };
+				}
+				function chainFlanger() {
+					const input = audioCtx.createGain();
+					const d = audioCtx.createDelay(0.01);
+					d.delayTime.value = 0.003;
+					const fb = audioCtx.createGain();
+					fb.gain.value = 0.25;
+					const lfo = audioCtx.createOscillator();
+					lfo.frequency.value = 0.25;
+					const lfoGain = audioCtx.createGain();
+					lfoGain.gain.value = 0.0025;
+					lfo.connect(lfoGain);
+					lfoGain.connect(d.delayTime);
+					lfo.start();
+					input.connect(d);
+					d.connect(fb);
+					fb.connect(d);
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					d.connect(wet);
+					wet.connect(sum);
+					return { name: 'Flanger', input, wet, _lfo: lfo };
+				}
+				function chainPhaser() {
+					const input = audioCtx.createGain();
+					const stages = 4;
+					let last = input;
+					const lfo = audioCtx.createOscillator();
+					lfo.frequency.value = 0.3;
+					const lfoGain = audioCtx.createGain();
+					lfoGain.gain.value = 400; // Hz swing
+					const filters = [];
+					for (let i = 0; i < stages; i++) {
+						const ap = audioCtx.createBiquadFilter();
+						ap.type = 'allpass';
+						ap.frequency.value = 800;
+						ap.Q.value = 0.707;
+						filters.push(ap);
+						last.connect(ap);
+						last = ap;
+					}
+					lfo.connect(lfoGain);
+					filters.forEach((f, i) => {
+						const bias = 400 + i * 120;
+						const adder = audioCtx.createConstantSource();
+						adder.offset.value = bias;
+						adder.start();
+						const sum = audioCtx.createGain();
+						lfoGain.connect(sum);
+						adder.connect(sum);
+						sum.connect(f.frequency);
+					});
+					lfo.start();
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					last.connect(wet);
+					wet.connect(sum);
+					return { name: 'Phaser', input, wet, _lfo: lfo };
+				}
+				function chainCompressor() {
+					const input = audioCtx.createGain();
+					const comp = audioCtx.createDynamicsCompressor();
+					comp.threshold.value = -24;
+					comp.ratio.value = 4;
+					comp.attack.value = 0.003;
+					comp.release.value = 0.25;
+					comp.knee.value = 30;
+					input.connect(comp);
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					comp.connect(wet);
+					wet.connect(sum);
+					return { name: 'Compressor', input, wet };
+				}
+				function chainGate() {
+					const input = audioCtx.createGain();
+					const comp = audioCtx.createDynamicsCompressor();
+					comp.threshold.value = -50;
+					comp.ratio.value = 20;
+					comp.attack.value = 0.001;
+					comp.release.value = 0.06;
+					comp.knee.value = 0;
+					input.connect(comp);
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					comp.connect(wet);
+					wet.connect(sum);
+					return { name: 'Gate / Expander', input, wet };
+				}
 
-				const state = {
-					reverse: false,
-					echo: { enabled: false, wet: 0 },
-					reverb: { enabled: false, wet: 0 },
-					chorus: { enabled: false, wet: 0 },
-					flanger: { enabled: false, wet: 0 },
-					phaser: { enabled: false, wet: 0 },
-					comp: { enabled: false, wet: 0 },
-					gate: { enabled: false, wet: 0 },
-				};
-
-				const api = {
-					dry,
-					fxIn,
-					// endpoints
-					wet: {
-						echo: wetEcho,
-						reverb: wetReverb,
-						chorus: wetChorus,
-						flanger: wetFlanger,
-						phaser: wetPhaser,
-						comp: wetComp,
-						gate: wetGate,
-					},
-					// nodes
-					nodes: {
-						delay,
-						conv,
-						chorusDelay,
-						flangerDelay,
-						phaserOut,
-						comp,
-						fb,
-						flangerFB,
-					},
-					osc: { chorusLFO, flangerLFO, phLFO, phDepth },
-					isReverse: false,
-					async setEnabled(key, on) {
-						if (key === 'reverse') {
-							this.isReverse = !!on;
-							state.reverse = !!on;
-							return;
-						}
-						const map = {
-							echo: [delay, wetEcho],
-							reverb: [conv, wetReverb],
-							chorus: [chorusDelay, wetChorus],
-							flanger: [flangerDelay, wetFlanger],
-							phaser: [phaserOut, wetPhaser],
-							comp: [comp, wetComp],
-							gate: ['gate', wetGate],
-						};
-						if (!(key in map)) return;
-						if (key === 'gate') {
-							if (on) {
-								await ensureGateNode();
-								connect(gateNode, wetGate);
-							} else {
-								if (gateNode) disconnect(gateNode, wetGate);
-							}
-							state.gate.enabled = !!on;
-							return;
-						}
-						const [node, wet] = map[key];
-						if (on) connect(node, wet);
-						else disconnect(node, wet);
-						state[key].enabled = !!on;
-					},
-					setWet(key, v) {
-						const g = Math.max(0, Math.min(1, v));
-						const map = {
-							echo: wetEcho,
-							reverb: wetReverb,
-							chorus: wetChorus,
-							flanger: wetFlanger,
-							phaser: wetPhaser,
-							comp: wetComp,
-							gate: wetGate,
-						};
-						if (!map[key]) return;
-						map[key].gain.value = g;
-						state[key].wet = g;
-					},
-					getState() {
-						return JSON.parse(JSON.stringify(state));
-					},
-				};
-				return api;
+				const chains = [
+					chainEcho(),
+					chainReverb(),
+					chainChorus(),
+					chainFlanger(),
+					chainPhaser(),
+					chainCompressor(),
+					chainGate(),
+				];
+				return { sum, dry, chains, reverse: false };
 			}
 
 			/* ========= Scheduler ========= */
@@ -1200,34 +835,18 @@
 				}
 			}
 
-			function startOneShot(item, when, startOffset, dur) {
+			function startOneShot(item, when, dur) {
 				const src = audioCtx.createBufferSource();
-
-				let buf = item.buffer,
-					offset = startOffset,
-					seg = dur;
-				if (item.fx && item.fx.isReverse) {
-					if (!item.revBuffer || item.revBuffer.length !== item.buffer.length) {
-						item.revBuffer = reverseAudioBuffer(item.buffer);
-					}
-					buf = item.revBuffer;
-					offset = Math.max(0, buf.duration - (startOffset + dur));
-					seg = Math.max(0.001, Math.min(dur, buf.duration - offset));
-				} else {
-					offset = Math.min(startOffset, item.buffer.duration - 0.001);
-					seg = Math.max(0.001, Math.min(dur, item.buffer.duration - offset));
-				}
-
-				src.buffer = buf;
+				src.buffer = item.fxGraph.reverse
+					? item.revBuffer || item.buffer
+					: item.buffer;
 				src.loop = false;
-				// Split to dry and FX input (both feed EQ input downstream)
-				src.connect(item.fx.dry);
-				src.connect(item.fx.fxIn);
-				src.start(when, offset, seg);
+				// connect to dry + each fx input
+				src.connect(item.fxGraph.dry);
+				for (const fx of item.fxGraph.chains) src.connect(fx.input);
+				src.start(when, 0, Math.max(0.001, Math.min(dur, src.buffer.duration)));
 				item.active.add(src);
-				src.onended = () => {
-					item.active.delete(src);
-				};
+				src.onended = () => item.active.delete(src);
 			}
 
 			function schedulerTick() {
@@ -1243,9 +862,8 @@
 					if (item.nextStartTime == null)
 						item.nextStartTime = firstStartAfter(now, item);
 					while (item.nextStartTime < horizon) {
-						const startOff = item.offsetInBar;
-						const dur = item.periodSec - item.offsetInBar; // truncate from head by offset
-						startOneShot(item, item.nextStartTime, startOff, dur);
+						const dur = item.periodSec - item.offsetInBar;
+						startOneShot(item, item.nextStartTime, dur);
 						item.nextStartTime += item.periodSec;
 					}
 				}
@@ -1255,17 +873,16 @@
 			function makeLoop(buffer) {
 				const id = `loop-${++loopCounter}`;
 				const gainNode = audioCtx.createGain();
-				gainNode.gain.value = 1.0;
+				gainNode.gain.value = 1;
 				gainNode.connect(masterGain);
 				const el = renderSampleItem({ id, duration: buffer.duration });
 				return {
 					id,
-					displayName: `Sample ${id.split('-')[1]}`,
 					buffer,
 					revBuffer: null,
 					gainNode,
 					el,
-					userGain: 1.0,
+					userGain: 1,
 					muted: false,
 					solo: false,
 					offsetInBar: 0,
@@ -1274,15 +891,12 @@
 					periodSec: buffer.duration,
 					nextStartTime: null,
 					active: new Set(),
-					eq: null,
-					fx: null,
+					fxGraph: null,
 				};
 			}
-
 			async function addLoop(buffer) {
 				ensureAudio();
 				buffer = await resampleToContext(buffer, audioCtx.sampleRate);
-
 				if (masterLenSec == null) {
 					masterLenSec = buffer.duration;
 					buffer = padToMultiple(buffer, masterLenSec, audioCtx);
@@ -1290,20 +904,17 @@
 				} else {
 					buffer = padToMultiple(buffer, masterLenSec, audioCtx);
 				}
-
 				const item = makeLoop(buffer);
 				item.buffer = buffer;
+				item.revBuffer = reverseBuffer(audioCtx, buffer);
 				item.periodBars = Math.max(
 					1,
 					Math.round(buffer.duration / masterLenSec)
 				);
 				item.periodSec = item.periodBars * masterLenSec;
-
-				item.eq = createEqFor(item);
-				item.fx = createFxFor(item, item.eq.in);
+				item.fxGraph = createFxGraph(item);
 
 				loops.set(item.id, item);
-
 				item.nextStartTime = firstStartAfter(audioCtx.currentTime, item);
 				startScheduler();
 
@@ -1321,8 +932,18 @@
 				const name = document.createElement('div');
 				name.className = 'name';
 				name.textContent = `Sample ${id.split('-')[1]}`;
-				name.title = 'Click to rename. Press Enter to commit.';
-				name.tabIndex = 0;
+				// editable name on Enter
+				name.contentEditable = 'true';
+				name.addEventListener('keydown', (e) => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						name.blur();
+					}
+				});
+				name.addEventListener('blur', () => {
+					name.textContent =
+						name.textContent.trim() || `Sample ${id.split('-')[1]}`;
+				});
 
 				const info = document.createElement('div');
 				info.className = 'info';
@@ -1378,28 +999,24 @@
 				solo.title = 'Solo';
 				solo.setAttribute('aria-pressed', 'false');
 				solo.textContent = '🎧';
-				const fxBtn = document.createElement('button');
-				fxBtn.className = 'fxbtn';
-				fxBtn.title = 'FX';
-				fxBtn.textContent = 'FX';
-				const eqBtn = document.createElement('button');
-				eqBtn.className = 'eqbtn';
-				eqBtn.title = 'EQ';
-				eqBtn.textContent = 'EQ';
 				const del = document.createElement('button');
 				del.className = 'del';
 				del.title = 'Delete loop';
 				del.setAttribute('aria-label', 'Delete loop');
 				del.textContent = '✕';
 
+				const fxbtn = document.createElement('button');
+				fxbtn.className = 'fxbtn';
+				fxbtn.title = 'FX';
+				fxbtn.textContent = 'FX';
+
 				row.appendChild(labelCol);
 				row.appendChild(vcol);
 				row.appendChild(play);
 				row.appendChild(mute);
 				row.appendChild(solo);
-				row.appendChild(fxBtn);
-				row.appendChild(eqBtn);
 				row.appendChild(del);
+				row.appendChild(fxbtn);
 				samplesEl.appendChild(row);
 
 				/* events */
@@ -1410,7 +1027,6 @@
 						applyGain(it);
 					}
 				});
-
 				mute.addEventListener('click', () => {
 					const it = loops.get(id);
 					if (!it) return;
@@ -1423,7 +1039,6 @@
 				solo.addEventListener('click', () => toggleSolo(id));
 				del.addEventListener('click', () => removeLoop(id));
 
-				// Play now (head-truncated slice), then re-align
 				play.addEventListener('click', () => {
 					const it = loops.get(id);
 					if (!it || !audioCtx) return;
@@ -1435,13 +1050,12 @@
 					it.active.clear();
 					const now = audioCtx.currentTime;
 					const next = firstStartAfter(now, it);
-					const sliceDur = Math.max(0.01, next - now);
-					const maxDur = Math.min(sliceDur, it.periodSec - it.offsetInBar);
-					startOneShot(it, now + 0.01, it.offsetInBar, maxDur);
+					const dur = Math.max(0.01, next - now);
+					startOneShot(it, now + 0.01, Math.min(dur, it.buffer.duration));
 					it.nextStartTime = next;
 				});
 
-				// Time-shift handle
+				// time-shift drag: offset in bar, truncate from start (handle never overdrawn)
 				function pxToOffset(clientX) {
 					const it = loops.get(id);
 					if (!it || masterLenSec == null) return 0;
@@ -1458,6 +1072,18 @@
 					it.bar.handle.style.left = `${
 						(it.offsetInBar / it.periodSec) * 100
 					}%`;
+				}
+				function updateFillUI(it, now) {
+					if (!it || !it.bar || transportStartTime == null) return;
+					const leftFrac = it.offsetInBar / it.periodSec;
+					const dur = it.periodSec - it.offsetInBar;
+					const anchor = transportStartTime + it.offsetInBar;
+					const k = Math.floor((now - anchor) / it.periodSec);
+					const cycleStart = anchor + Math.max(0, k) * it.periodSec;
+					const elapsed = Math.max(0, now - cycleStart);
+					const prog = Math.min(elapsed, dur);
+					it.bar.fill.style.left = `${leftFrac * 100}%`;
+					it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
 				}
 				function dragAt(clientX) {
 					const it = loops.get(id);
@@ -1493,7 +1119,7 @@
 					it.active.clear();
 					it.nextStartTime = firstStartAfter(audioCtx.currentTime, it);
 					setStatus(
-						`Shifted ${getDisplayNameSafe(id)} to ${it.offsetInBar.toFixed(
+						`Shifted Sample ${id.split('-')[1]} to ${it.offsetInBar.toFixed(
 							2
 						)}s of the bar.`
 					);
@@ -1503,6 +1129,7 @@
 				prog.addEventListener('pointerup', onUp);
 				prog.addEventListener('pointercancel', onUp);
 				handle.addEventListener('pointerdown', onDown);
+				// mouse fallback
 				prog.addEventListener('mousedown', (e) => {
 					onDown(e);
 					const mm = (ev) => onMove(ev);
@@ -1515,48 +1142,15 @@
 					document.addEventListener('mouseup', mu, { once: true });
 				});
 
-				// Editable name
-				function commitName() {
+				// FX button opens modal
+				fxbtn.addEventListener('click', () => {
 					const it = loops.get(id);
 					if (!it) return;
-					const text = (name.textContent || '').trim();
-					const val = text.length ? text : it.displayName;
-					it.displayName = val;
-					name.textContent = val;
-					name.contentEditable = 'false';
-					if (eqCurrentId === id) eqTrackName.textContent = it.displayName;
-					if (fxCurrentId === id) fxTrackName.textContent = it.displayName;
-				}
-				name.addEventListener('click', () => {
-					name.contentEditable = 'true';
-					const r = document.createRange();
-					r.selectNodeContents(name);
-					r.collapse(false);
-					const sel = window.getSelection();
-					sel.removeAllRanges();
-					sel.addRange(r);
-					name.focus();
+					openFxModal(
+						it,
+						name.textContent.trim() || `Sample ${id.split('-')[1]}`
+					);
 				});
-				name.addEventListener('keydown', (e) => {
-					if (e.key === 'Enter') {
-						e.preventDefault();
-						commitName();
-						name.blur();
-					} else if (e.key === 'Escape') {
-						e.preventDefault();
-						const it = loops.get(id);
-						if (it) {
-							name.textContent = it.displayName;
-						}
-						name.contentEditable = 'false';
-						name.blur();
-					}
-				});
-				name.addEventListener('blur', commitName);
-
-				// EQ & FX buttons
-				eqBtn.addEventListener('click', () => openEqModal(id));
-				fxBtn.addEventListener('click', () => openFxModal(id));
 
 				queueMicrotask(() => {
 					const it = loops.get(id);
@@ -1569,41 +1163,50 @@
 				return row;
 			}
 
-			/* ======= VISUAL PROGRESS ======= */
-			function updateFillUI(it, now) {
-				if (!it || !it.bar || transportStartTime == null) return;
-				const leftFrac = it.offsetInBar / it.periodSec;
-				const dur = it.periodSec - it.offsetInBar;
-
-				const anchor = transportStartTime + it.offsetInBar;
-				const k = Math.floor((now - anchor) / it.periodSec);
-				const cycleStart = anchor + Math.max(0, k) * it.periodSec;
-
-				const elapsed = Math.max(0, now - cycleStart);
-				const prog = Math.min(elapsed, dur);
-
-				it.bar.fill.style.left = `${leftFrac * 100}%`;
-				it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
+			/* ===== UI ticker for progress ===== */
+			let uiRAF = null;
+			function ensureUiTicker() {
+				if (!uiRAF) uiRAF = requestAnimationFrame(updateBars);
 			}
-
-			/* ========= Solo ========= */
-			function toggleSolo(id) {
-				const cur = loops.get(id);
-				if (!cur) return;
-				const enable = !cur.solo;
-				for (const [, it] of loops) it.solo = enable ? it.id === id : false;
-				updateSoloButtonsUI();
-				updateAllGains();
+			function updateBars() {
+				const now = !audioCtx ? 0 : audioCtx.currentTime;
+				for (const [, it] of loops) {
+					// updateFillUI inline replica
+					if (!it || !it.bar || transportStartTime == null) continue;
+					const leftFrac = it.offsetInBar / it.periodSec;
+					const dur = it.periodSec - it.offsetInBar;
+					const anchor = transportStartTime + it.offsetInBar;
+					const k = Math.floor((now - anchor) / it.periodSec);
+					const cycleStart = anchor + Math.max(0, k) * it.periodSec;
+					const elapsed = Math.max(0, now - cycleStart);
+					const prog = Math.min(elapsed, dur);
+					it.bar.fill.style.left = `${leftFrac * 100}%`;
+					it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
+				}
+				uiRAF = requestAnimationFrame(updateBars);
 			}
+			ensureUiTicker();
+
+			/* ========= Solo helpers ========= */
 			function updateSoloButtonsUI() {
 				for (const [, it] of loops) {
 					const row = document.getElementById(it.id);
 					if (!row) continue;
-					const b = row.querySelector('.solo');
-					if (!b) continue;
-					b.classList.toggle('active', !!it.solo);
-					b.setAttribute('aria-pressed', String(!!it.solo));
+					const btn = row.querySelector('.solo');
+					if (!btn) continue;
+					btn.classList.toggle('active', !!it.solo);
+					btn.setAttribute('aria-pressed', String(!!it.solo));
 				}
+			}
+			function toggleSolo(id) {
+				const current = loops.get(id);
+				if (!current) return;
+				const enable = !current.solo;
+				for (const [, it] of loops) {
+					it.solo = enable ? it.id === id : false;
+				}
+				updateSoloButtonsUI();
+				updateAllGains();
 			}
 
 			/* ========= Remove ========= */
@@ -1653,7 +1256,7 @@
 				}
 			});
 
-			/* ========= Mix recorder (auto WAV) ========= */
+			/* ========= Mix recorder ========= */
 			function ensureMixStream() {
 				if (!audioCtx) return;
 				if (!mixDest) {
@@ -1663,8 +1266,8 @@
 			}
 			function bufferToInterleavedFloat32(buf) {
 				const ch = buf.numberOfChannels | 0,
-					frames = buf.length | 0;
-				const out = new Float32Array(frames * ch);
+					frames = buf.length | 0,
+					out = new Float32Array(frames * ch);
 				for (let i = 0; i < frames; i++)
 					for (let c = 0; c < ch; c++)
 						out[i * ch + c] = buf.getChannelData(c)[i] || 0;
@@ -1681,15 +1284,15 @@
 				return dv.buffer;
 			}
 			function createWavFromBuffer(buf) {
-				const inter = bufferToInterleavedFloat32(buf);
-				const sr = buf.sampleRate | 0;
-				const ch = buf.numberOfChannels | 0;
+				const inter = bufferToInterleavedFloat32(buf),
+					sr = buf.sampleRate | 0,
+					ch = buf.numberOfChannels | 0;
 				const bps = 2,
 					blockAlign = ch * bps,
 					byteRate = sr * blockAlign,
 					dataBytes = inter.length * bps;
-				const header = new ArrayBuffer(44);
-				const dv = new DataView(header);
+				const header = new ArrayBuffer(44),
+					dv = new DataView(header);
 				let p = 0;
 				const ws = (s) => {
 					for (let i = 0; i < s.length; i++) dv.setUint8(p++, s.charCodeAt(i));
@@ -1814,18 +1417,6 @@
 			}
 			mixRecBtn.addEventListener('click', toggleMixRecording);
 
-			/* ========= UI ticker ========= */
-			let uiRAF = null;
-			function ensureUiTicker() {
-				if (!uiRAF) uiRAF = requestAnimationFrame(updateBars);
-			}
-			function updateBars() {
-				const now = !audioCtx ? 0 : audioCtx.currentTime;
-				for (const [, it] of loops) updateFillUI(it, now);
-				uiRAF = requestAnimationFrame(updateBars);
-			}
-			ensureUiTicker();
-
 			/* ========= Keyboard ========= */
 			function isInteractive(el) {
 				if (!el) return false;
@@ -1920,7 +1511,106 @@
 				}
 			}
 
-			/* ========= Solo helpers ========= */
+			/* ========= FX Modal ========= */
+			function openFxModal(item, title) {
+				fxModalItem = item;
+				fxTitle.textContent = `FX — ${title}`;
+				fxListEl.innerHTML = '';
+
+				// first row: Reverse (toggle)
+				const revRow = document.createElement('div');
+				revRow.className = 'fx-row';
+				const revLabel = document.createElement('label');
+				const revChk = document.createElement('input');
+				revChk.type = 'checkbox';
+				revChk.checked = !!item.fxGraph.reverse;
+				const revText = document.createElement('span');
+				revText.textContent = 'Reverse (toggle)';
+				const dash = document.createElement('span');
+				dash.className = 'small';
+				dash.textContent = '—';
+				revLabel.appendChild(revChk);
+				revLabel.appendChild(revText);
+				revLabel.appendChild(dash);
+				const revSpacer = document.createElement('div'); // nothing at right
+				revRow.appendChild(revLabel);
+				revRow.appendChild(revSpacer);
+				fxListEl.appendChild(revRow);
+				revChk.addEventListener('change', () => {
+					item.fxGraph.reverse = revChk.checked;
+				});
+
+				// remaining FX chains with independent wet sliders
+				const names = [
+					'Echo',
+					'Reverb',
+					'Chorus',
+					'Flanger',
+					'Phaser',
+					'Compressor',
+					'Gate / Expander',
+				];
+				for (let i = 0; i < names.length; i++) {
+					const chain = item.fxGraph.chains[i];
+					const row = document.createElement('div');
+					row.className = 'fx-row';
+					const lab = document.createElement('label');
+					const cb = document.createElement('input');
+					cb.type = 'checkbox';
+					cb.checked = chain.wet.gain.value > 0.0001;
+					const txt = document.createElement('span');
+					txt.textContent = names[i];
+					lab.appendChild(cb);
+					lab.appendChild(txt);
+					const slider = document.createElement('input');
+					slider.type = 'range';
+					slider.min = '0';
+					slider.max = '100';
+					slider.step = '1';
+					slider.value = Math.round(chain.wet.gain.value * 100);
+					row.appendChild(lab);
+					row.appendChild(slider);
+					fxListEl.appendChild(row);
+
+					function apply() {
+						const wet = cb.checked ? parseInt(slider.value, 10) / 100 : 0;
+						chain.wet.gain.value = wet;
+					}
+					cb.addEventListener('change', apply);
+					slider.addEventListener('input', apply);
+				}
+
+				fxModal.classList.add('show');
+				fxModal.setAttribute('aria-hidden', 'false');
+			}
+			fxCloseBtn.addEventListener('click', closeFxModal);
+			fxAllOffBtn.addEventListener('click', () => {
+				if (!fxModalItem) return;
+				for (const ch of fxModalItem.fxGraph.chains) {
+					ch.wet.gain.value = 0;
+				}
+				// also uncheck UI
+				fxListEl.querySelectorAll('input[type="checkbox"]').forEach((el, i) => {
+					if (i > 0) el.checked = false;
+				}); // i=0 is Reverse
+				fxListEl.querySelectorAll('input[type="range"]').forEach((el) => {
+					el.value = '0';
+				});
+			});
+			function closeFxModal() {
+				fxModal.classList.remove('show');
+				fxModal.setAttribute('aria-hidden', 'true');
+				fxModalItem = null;
+			}
+			fxModal.addEventListener('click', (e) => {
+				if (e.target === fxModal) closeFxModal();
+			});
+			window.addEventListener('keydown', (e) => {
+				if (e.key === 'Escape' && fxModal.classList.contains('show'))
+					closeFxModal();
+			});
+
+			/* ========= Solo UI again (for completeness) ========= */
 			function updateSoloButtonsUI() {
 				for (const [, it] of loops) {
 					const row = document.getElementById(it.id);
@@ -1941,253 +1631,6 @@
 				updateSoloButtonsUI();
 				updateAllGains();
 			}
-
-			/* ========= Name helpers ========= */
-			function getDisplayNameSafe(id) {
-				const it = loops.get(id);
-				return it && it.displayName
-					? it.displayName
-					: `Sample ${id.split('-')[1]}`;
-			}
-
-			/* ========= EQ Modal wiring ========= */
-			const eqBackdrop = document.getElementById('eqBackdrop');
-			const eqTrackName = document.getElementById('eqTrackName');
-			const eqLow = document.getElementById('eqLow');
-			const eqLowMid = document.getElementById('eqLowMid');
-			const eqMid = document.getElementById('eqMid');
-			const eqHighMid = document.getElementById('eqHighMid');
-			const eqHigh = document.getElementById('eqHigh');
-			const eqLowVal = document.getElementById('eqLowVal');
-			const eqLowMidVal = document.getElementById('eqLowMidVal');
-			const eqMidVal = document.getElementById('eqMidVal');
-			const eqHighMidVal = document.getElementById('eqHighMidVal');
-			const eqHighVal = document.getElementById('eqHighVal');
-			const eqClose = document.getElementById('eqClose');
-			const eqReset = document.getElementById('eqReset');
-
-			let eqCurrentId = null;
-
-			function setEqSliderVals(item) {
-				eqLow.value = item.eq.low.gain.value;
-				eqLowMid.value = item.eq.lowMid.gain.value;
-				eqMid.value = item.eq.mid.gain.value;
-				eqHighMid.value = item.eq.highMid.gain.value;
-				eqHigh.value = item.eq.high.gain.value;
-
-				eqLowVal.textContent = (+eqLow.value).toFixed(1);
-				eqLowMidVal.textContent = (+eqLowMid.value).toFixed(1);
-				eqMidVal.textContent = (+eqMid.value).toFixed(1);
-				eqHighMidVal.textContent = (+eqHighMid.value).toFixed(1);
-				eqHighVal.textContent = (+eqHigh.value).toFixed(1);
-			}
-
-			function openEqModal(id) {
-				const it = loops.get(id);
-				if (!it) return;
-				eqCurrentId = id;
-				eqTrackName.textContent =
-					it.displayName || `Sample ${id.split('-')[1]}`;
-				setEqSliderVals(it);
-				eqBackdrop.style.display = 'flex';
-			}
-			function closeEqModal() {
-				eqBackdrop.style.display = 'none';
-				eqCurrentId = null;
-			}
-
-			eqLow.addEventListener('input', () => {
-				if (!eqCurrentId) return;
-				const it = loops.get(eqCurrentId);
-				if (!it) return;
-				it.eq.low.gain.value = +eqLow.value;
-				eqLowVal.textContent = (+eqLow.value).toFixed(1);
-			});
-			eqLowMid.addEventListener('input', () => {
-				if (!eqCurrentId) return;
-				const it = loops.get(eqCurrentId);
-				if (!it) return;
-				it.eq.lowMid.gain.value = +eqLowMid.value;
-				eqLowMidVal.textContent = (+eqLowMid.value).toFixed(1);
-			});
-			eqMid.addEventListener('input', () => {
-				if (!eqCurrentId) return;
-				const it = loops.get(eqCurrentId);
-				if (!it) return;
-				it.eq.mid.gain.value = +eqMid.value;
-				eqMidVal.textContent = (+eqMid.value).toFixed(1);
-			});
-			eqHighMid.addEventListener('input', () => {
-				if (!eqCurrentId) return;
-				const it = loops.get(eqCurrentId);
-				if (!it) return;
-				it.eq.highMid.gain.value = +eqHighMid.value;
-				eqHighMidVal.textContent = (+eqHighMid.value).toFixed(1);
-			});
-			eqHigh.addEventListener('input', () => {
-				if (!eqCurrentId) return;
-				const it = loops.get(eqCurrentId);
-				if (!it) return;
-				it.eq.high.gain.value = +eqHigh.value;
-				eqHighVal.textContent = (+eqHigh.value).toFixed(1);
-			});
-
-			eqReset.addEventListener('click', () => {
-				if (!eqCurrentId) return;
-				const it = loops.get(eqCurrentId);
-				if (!it) return;
-				it.eq.reset();
-				setEqSliderVals(it);
-			});
-			eqClose.addEventListener('click', closeEqModal);
-			eqBackdrop.addEventListener('click', (e) => {
-				if (e.target === eqBackdrop) closeEqModal();
-			});
-
-			/* ========= FX Modal wiring ========= */
-			const fxBackdrop = document.getElementById('fxBackdrop');
-			const fxTrackName = document.getElementById('fxTrackName');
-
-			const fxReverse = document.getElementById('fxReverse');
-
-			const fxEcho = document.getElementById('fxEcho');
-			const fxEchoWet = document.getElementById('fxEchoWet');
-
-			const fxReverb = document.getElementById('fxReverb');
-			const fxReverbWet = document.getElementById('fxReverbWet');
-
-			const fxChorus = document.getElementById('fxChorus');
-			const fxChorusWet = document.getElementById('fxChorusWet');
-
-			const fxFlanger = document.getElementById('fxFlanger');
-			const fxFlangerWet = document.getElementById('fxFlangerWet');
-
-			const fxPhaser = document.getElementById('fxPhaser');
-			const fxPhaserWet = document.getElementById('fxPhaserWet');
-
-			const fxComp = document.getElementById('fxComp');
-			const fxCompWet = document.getElementById('fxCompWet');
-
-			const fxGate = document.getElementById('fxGate');
-			const fxGateWet = document.getElementById('fxGateWet');
-
-			const fxClose = document.getElementById('fxClose');
-			const fxAllOff = document.getElementById('fxAllOff');
-
-			let fxCurrentId = null;
-
-			function setFxControlsFromState(item) {
-				const st = item.fx.getState();
-				fxReverse.checked = !!st.reverse;
-
-				fxEcho.checked = !!st.echo.enabled;
-				fxEchoWet.value = Math.round((st.echo.wet || 0) * 100);
-				fxReverb.checked = !!st.reverb.enabled;
-				fxReverbWet.value = Math.round((st.reverb.wet || 0) * 100);
-				fxChorus.checked = !!st.chorus.enabled;
-				fxChorusWet.value = Math.round((st.chorus.wet || 0) * 100);
-				fxFlanger.checked = !!st.flanger.enabled;
-				fxFlangerWet.value = Math.round((st.flanger.wet || 0) * 100);
-				fxPhaser.checked = !!st.phaser.enabled;
-				fxPhaserWet.value = Math.round((st.phaser.wet || 0) * 100);
-				fxComp.checked = !!st.comp.enabled;
-				fxCompWet.value = Math.round((st.comp.wet || 0) * 100);
-				fxGate.checked = !!st.gate.enabled;
-				fxGateWet.value = Math.round((st.gate.wet || 0) * 100);
-			}
-
-			function openFxModal(id) {
-				const it = loops.get(id);
-				if (!it) return;
-				fxCurrentId = id;
-				fxTrackName.textContent =
-					it.displayName || `Sample ${id.split('-')[1]}`;
-				setFxControlsFromState(it);
-				fxBackdrop.style.display = 'flex';
-			}
-			function closeFxModal() {
-				fxBackdrop.style.display = 'none';
-				fxCurrentId = null;
-			}
-
-			async function bindFxCheckbox(cb, key) {
-				cb.addEventListener('change', async () => {
-					if (!fxCurrentId) return;
-					const it = loops.get(fxCurrentId);
-					if (!it) return;
-					await it.fx.setEnabled(key, cb.checked);
-					const pretty =
-						key === 'gate'
-							? 'Gate/Expander'
-							: key === 'comp'
-							? 'Compressor'
-							: key[0].toUpperCase() + key.slice(1);
-					setStatus(`${pretty} ${cb.checked ? 'enabled' : 'disabled'}.`);
-				});
-			}
-			function bindFxWet(sl, key) {
-				sl.addEventListener('input', () => {
-					if (!fxCurrentId) return;
-					const it = loops.get(fxCurrentId);
-					if (!it) return;
-					it.fx.setWet(key, parseInt(sl.value, 10) / 100);
-				});
-			}
-
-			// Bind all
-			bindFxCheckbox(fxReverse, 'reverse');
-
-			bindFxCheckbox(fxEcho, 'echo');
-			bindFxWet(fxEchoWet, 'echo');
-			bindFxCheckbox(fxReverb, 'reverb');
-			bindFxWet(fxReverbWet, 'reverb');
-			bindFxCheckbox(fxChorus, 'chorus');
-			bindFxWet(fxChorusWet, 'chorus');
-			bindFxCheckbox(fxFlanger, 'flanger');
-			bindFxWet(fxFlangerWet, 'flanger');
-			bindFxCheckbox(fxPhaser, 'phaser');
-			bindFxWet(fxPhaserWet, 'phaser');
-			bindFxCheckbox(fxComp, 'comp');
-			bindFxWet(fxCompWet, 'comp');
-			bindFxCheckbox(fxGate, 'gate');
-			bindFxWet(fxGateWet, 'gate');
-
-			fxAllOff.addEventListener('click', async () => {
-				if (!fxCurrentId) return;
-				const it = loops.get(fxCurrentId);
-				if (!it) return;
-				const pairs = [
-					[fxReverse, 'reverse', false],
-					[fxEcho, 'echo', true],
-					[fxReverb, 'reverb', true],
-					[fxChorus, 'chorus', true],
-					[fxFlanger, 'flanger', true],
-					[fxPhaser, 'phaser', true],
-					[fxComp, 'comp', true],
-					[fxGate, 'gate', true],
-				];
-				for (const [cb, key, hasWet] of pairs) {
-					cb.checked = false;
-					await it.fx.setEnabled(key, false);
-					if (hasWet) {
-						it.fx.setWet(key, 0);
-					}
-				}
-				setFxControlsFromState(it);
-				setStatus('All FX disabled.');
-			});
-			fxClose.addEventListener('click', closeFxModal);
-			fxBackdrop.addEventListener('click', (e) => {
-				if (e.target === fxBackdrop) closeFxModal();
-			});
-
-			// Close modals on Esc
-			window.addEventListener('keydown', (e) => {
-				if (e.key === 'Escape') {
-					if (eqBackdrop.style.display === 'flex') closeEqModal();
-					if (fxBackdrop.style.display === 'flex') closeFxModal();
-				}
-			});
 		</script>
 	</body>
 </html>
