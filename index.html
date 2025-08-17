@@ -14,6 +14,7 @@
 				--bar: #2a2f48;
 				--barFill: #5eead4;
 				--handle: #a8ffcb;
+				--modalBg: rgba(4, 6, 14, 0.6);
 			}
 			* {
 				box-sizing: border-box;
@@ -100,7 +101,8 @@
 			}
 			.sample {
 				display: grid;
-				grid-template-columns: 1fr minmax(220px, 34%) 42px 42px 42px 42px 56px;
+				/* label | controls | play | mute | solo | EQ | FX | X */
+				grid-template-columns: 1fr minmax(220px, 34%) 42px 42px 42px 42px 42px 42px;
 				gap: 10px;
 				align-items: center;
 				background: var(--panel);
@@ -112,7 +114,6 @@
 				font-weight: 600;
 				color: #dbe2ff;
 				font-size: 14px;
-				cursor: text;
 			}
 			.sample .info {
 				color: #9aa0b4;
@@ -120,7 +121,6 @@
 				margin-bottom: 16px;
 			}
 
-			/* progress + handle */
 			.progWrap {
 				display: grid;
 				gap: 6px;
@@ -139,7 +139,7 @@
 				top: 0;
 				height: 100%;
 				left: 0;
-				width: 0;
+				width: 0%;
 				background: var(--barFill);
 				opacity: 0.9;
 			}
@@ -196,7 +196,8 @@
 			.mute,
 			.solo,
 			.play,
-			.fxbtn {
+			.eq,
+			.fx {
 				border: 0;
 				background: #2a2f48;
 				color: #d7e3ff;
@@ -207,6 +208,11 @@
 				cursor: pointer;
 				transition: background 0.2s ease, transform 0.04s ease;
 			}
+			.fx,
+			.eq {
+				font-size: 14px;
+				font-weight: 700;
+			}
 			.del {
 				color: #ffb4b4;
 			}
@@ -214,14 +220,16 @@
 			.mute:hover,
 			.solo:hover,
 			.play:hover,
-			.fxbtn:hover {
+			.eq:hover,
+			.fx:hover {
 				background: #353b5a;
 			}
 			.del:active,
 			.mute:active,
 			.solo:active,
 			.play:active,
-			.fxbtn:active {
+			.eq:active,
+			.fx:active {
 				transform: translateY(1px);
 			}
 			.mute.active {
@@ -238,7 +246,7 @@
 					grid-template-columns: 1fr;
 				}
 				.sample {
-					grid-template-columns: 1fr 1fr 42px 42px 42px 42px 56px;
+					grid-template-columns: 1fr 1fr 42px 42px 42px 42px 42px 42px;
 				}
 			}
 
@@ -254,7 +262,6 @@
 			.scope.active {
 				display: block;
 			}
-
 			.footer {
 				margin-top: 18px;
 				color: #9aa0b4;
@@ -262,69 +269,112 @@
 				text-align: center;
 			}
 
-			/* ---------- Modal (FX) ---------- */
-			.modal {
+			/* ---------- Modal (shared) ---------- */
+			.modal-backdrop {
 				position: fixed;
 				inset: 0;
-				background: rgba(0, 0, 0, 0.55);
+				background: var(--modalBg);
 				display: none;
 				align-items: center;
 				justify-content: center;
-				z-index: 1000;
+				z-index: 9999;
 			}
-			.modal.show {
-				display: flex;
-			}
-			.card {
-				width: min(760px, 92vw);
-				background: #12162a;
+			.modal {
+				background: #11172b;
 				border: 1px solid #242a42;
 				border-radius: 12px;
-				box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
-				padding: 18px;
+				box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+				width: min(900px, 92vw);
+				padding: 16px;
 			}
-			.card h3 {
-				margin: 0 0 12px 0;
-				font-weight: 700;
-			}
-			.fx-list {
-				display: grid;
-				grid-template-columns: 1fr;
-				gap: 12px;
-				margin-top: 8px;
-			}
-			/* Fixed label column so every slider (right column) has identical width */
-			.fx-row {
-				display: grid;
-				grid-template-columns: 220px 1fr; /* was: auto 1fr */
+			.modal header {
+				display: flex;
 				align-items: center;
-				gap: 12px;
+				justify-content: space-between;
+				margin-bottom: 8px;
+			}
+			.modal h3 {
+				margin: 0;
+				font-size: 18px;
+			}
+			.modal .actions {
+				display: flex;
+				gap: 10px;
+			}
+			.pill {
+				background: #2a2f48;
+				color: #dfe6ff;
+				border: none;
+				border-radius: 8px;
+				padding: 8px 12px;
+				cursor: pointer;
+			}
+			.pill:hover {
+				background: #353b5a;
 			}
 
-			/* Make sure the sliders actually span the full right column */
-			.fx-row input[type='range'] {
-				width: 100%;
-				margin: 0; /* Firefox can add default margins */
+			/* ---------- EQ modal ---------- */
+			.eq-grid {
+				display: grid;
+				grid-template-columns: repeat(5, 1fr);
+				gap: 16px;
+				margin-top: 8px;
+			}
+			.eq-band {
+				background: #12182b;
+				border: 1px solid #232a46;
+				border-radius: 10px;
+				padding: 12px;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+			}
+			.eq-band h4 {
+				margin: 0 0 2px 0;
+				font-size: 13px;
+			}
+			.eq-band .sub {
+				color: #9aa0b4;
+				font-size: 11px;
+				margin-bottom: 8px;
+			}
+			.eq-band .db {
+				margin-top: 8px;
+				font-size: 12px;
+				color: #cfd6ff;
+			}
+			.vslider {
+				width: 28px;
+				height: 160px;
+				margin: 6px 0;
+				/* standards-friendly vertical range slider */
+				writing-mode: vertical-lr;
+				direction: rtl;
+				background: transparent;
+				border: none;
 				accent-color: var(--accent);
 			}
-			.fx-row label {
+
+			/* ---------- FX modal ---------- */
+			.fx-list {
+				display: grid;
+				grid-template-columns: max-content 1fr; /* labels and sliders close together */
+				column-gap: 14px;
+				row-gap: 12px;
+				align-items: center;
+				margin-top: 8px;
+			}
+			.fx-name {
 				display: flex;
 				align-items: center;
 				gap: 10px;
 			}
-			.modal-actions {
-				display: flex;
-				gap: 10px;
-				justify-content: flex-end;
-				margin-top: 16px;
+			.fx-name input[type='checkbox'] {
+				transform: scale(1.1);
 			}
-			.small {
-				font-size: 12px;
-				color: var(--muted);
-				margin-left: 6px;
-			}
-			.fxbtn {
-				width: 56px;
+			.fx-list input[type='range'] {
+				width: 100%;
 			}
 		</style>
 	</head>
@@ -353,34 +403,43 @@
 			</div>
 		</div>
 
-		<!-- FX modal -->
-		<div id="fxModal" class="modal" aria-hidden="true">
-			<div
-				class="card"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby="fxTitle"
-			>
-				<h3 id="fxTitle">FX</h3>
-				<div class="fx-list" id="fxList">
-					<!-- rows injected -->
-				</div>
-				<div class="modal-actions">
-					<button
-						id="fxAllOff"
-						class="btn stop"
-						style="padding: 8px 12px; font-size: 14px"
-					>
-						All Off
-					</button>
-					<button
-						id="fxClose"
-						class="btn record"
-						style="padding: 8px 12px; font-size: 14px"
-					>
-						Close
-					</button>
-				</div>
+		<!-- ---------- EQ Modal ---------- -->
+		<div
+			id="eqBackdrop"
+			class="modal-backdrop"
+			role="dialog"
+			aria-modal="true"
+			aria-hidden="true"
+		>
+			<div class="modal" role="document">
+				<header>
+					<h3 id="eqTitle">EQ</h3>
+					<div class="actions">
+						<button id="eqReset" class="pill">Reset</button>
+						<button id="eqClose" class="pill">Close</button>
+					</div>
+				</header>
+				<div id="eqGrid" class="eq-grid"></div>
+			</div>
+		</div>
+
+		<!-- ---------- FX Modal ---------- -->
+		<div
+			id="fxBackdrop"
+			class="modal-backdrop"
+			role="dialog"
+			aria-modal="true"
+			aria-hidden="true"
+		>
+			<div class="modal" role="document">
+				<header>
+					<h3 id="fxTitle">FX</h3>
+					<div class="actions">
+						<button id="fxAllOff" class="pill">All Off</button>
+						<button id="fxClose" class="pill">Close</button>
+					</div>
+				</header>
+				<div id="fxList" class="fx-list"></div>
 			</div>
 		</div>
 
@@ -395,7 +454,7 @@
 				recordingChunks = [];
 			let loopCounter = 0;
 
-			/* Scope */
+			/* Oscilloscope state (declare ONCE) */
 			let micSource = null,
 				analyser = null,
 				scopeRAF = null,
@@ -403,14 +462,14 @@
 				isDrawing = false;
 			let recStartPerf = 0;
 
-			/* Transport / bar */
+			/* Transport grid */
 			let masterLenSec = null;
 			let transportStartTime = null;
 
-			/* One-shot scheduler */
+			/* Scheduler */
 			let schedTimer = null;
-			const SCHEDULE_AHEAD = 0.25;
-			const SCHEDULE_INTERVAL = 50;
+			const SCHEDULE_AHEAD = 0.25,
+				SCHEDULE_INTERVAL = 50;
 
 			/* Mix recording */
 			let mixDest = null,
@@ -419,10 +478,9 @@
 				mixRecording = false;
 
 			/** loop item:
-			 * { id, buffer, revBuffer, gainNode, el, userGain, muted, solo,
-			 *   offsetInBar, bar:{wrap,fill,handle},
-			 *   periodBars, periodSec, nextStartTime, active:Set,
-			 *   fxGraph:{dry,sum,chains,reverse} }
+			 * { id, buffer, reversedBuffer, gainNode, el, userGain, muted, solo,
+			 *   offsetInBar, bar:{wrap,fill,handle}, periodBars, periodSec, nextStartTime,
+			 *   active:Set, eq:{input,output,bands}, rack:{tap,dry,effects,reverse} }
 			 */
 			const loops = new Map();
 
@@ -435,13 +493,18 @@
 			const scopeCanvas = document.getElementById('scope');
 			const scopeCtx = scopeCanvas.getContext('2d');
 
-			/* FX modal DOM */
-			const fxModal = document.getElementById('fxModal');
+			/* Modals */
+			const eqBackdrop = document.getElementById('eqBackdrop');
+			const eqGrid = document.getElementById('eqGrid');
+			const eqTitle = document.getElementById('eqTitle');
+			const eqClose = document.getElementById('eqClose');
+			const eqReset = document.getElementById('eqReset');
+
+			const fxBackdrop = document.getElementById('fxBackdrop');
+			const fxList = document.getElementById('fxList');
 			const fxTitle = document.getElementById('fxTitle');
-			const fxListEl = document.getElementById('fxList');
-			const fxCloseBtn = document.getElementById('fxClose');
-			const fxAllOffBtn = document.getElementById('fxAllOff');
-			let fxModalItem = null;
+			const fxClose = document.getElementById('fxClose');
+			const fxAllOff = document.getElementById('fxAllOff');
 
 			const setStatus = (m) => (statusEl.textContent = m);
 
@@ -449,14 +512,14 @@
 				if (!audioCtx) {
 					audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 					masterGain = audioCtx.createGain();
-					masterGain.gain.value = 1;
+					masterGain.gain.value = 1.0;
 					masterGain.connect(audioCtx.destination);
 					haltBtn.disabled = false;
 					updateHaltButtonUI();
 				}
 			}
 
-			/* ========= Mic ========= */
+			/* ========= Mic recording ========= */
 			async function getMicStream() {
 				if (mediaStream && mediaStream.active) return mediaStream;
 				mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -493,7 +556,7 @@
 				);
 			}
 
-			/* ========= Scope ========= */
+			/* ========= Oscilloscope ========= */
 			function ensureAnalyser(stream) {
 				if (!micSource) {
 					micSource = audioCtx.createMediaStreamSource(stream);
@@ -560,13 +623,13 @@
 				scopeCtx.strokeStyle = '#79ffe1';
 				scopeCtx.stroke();
 				if (mediaRecorder && mediaRecorder.state === 'recording') {
-					const elapsed = (performance.now() - recStartPerf) / 1000;
-					const text = `REC ${fmtTime(elapsed)}`,
+					const elapsed = (performance.now() - recStartPerf) / 1000,
+						text = `REC ${fmtTime(elapsed)}`,
 						pad = 6,
 						h = 22;
 					scopeCtx.font = '13px system-ui,-apple-system,Segoe UI,Roboto,Arial';
 					const w = Math.ceil(scopeCtx.measureText(text).width) + pad * 2;
-					scopeCtx.fillStyle = 'rgba(0,0,0,.45)';
+					scopeCtx.fillStyle = 'rgba(0,0,0,0.45)';
 					scopeCtx.fillRect(cssW - w - 8, 8, w, h);
 					scopeCtx.fillStyle = '#e6e8f1';
 					scopeCtx.fillText(text, cssW - w - 8 + pad, 8 + 15);
@@ -604,11 +667,11 @@
 
 			/* ========= Helpers ========= */
 			function padToMultiple(buffer, baseSec, ctx) {
-				const rate = buffer.sampleRate | 0;
-				const baseFrames = Math.max(1, Math.round(baseSec * rate));
-				const cur = buffer.length | 0;
-				const multiple = Math.max(1, Math.ceil(cur / baseFrames));
-				const newLen = multiple * baseFrames;
+				const rate = buffer.sampleRate | 0,
+					baseFrames = Math.max(1, Math.round(baseSec * rate));
+				const cur = buffer.length | 0,
+					multiple = Math.max(1, Math.ceil(cur / baseFrames)),
+					newLen = multiple * baseFrames;
 				if (newLen === cur) return buffer;
 				const out = ctx.createBuffer(buffer.numberOfChannels, newLen, rate);
 				for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
@@ -636,19 +699,19 @@
 				s.start(0);
 				return await off.startRendering();
 			}
-			function reverseBuffer(ctx, buf) {
-				const ch = buf.numberOfChannels | 0,
-					len = buf.length | 0,
-					out = ctx.createBuffer(ch, len, buf.sampleRate | 0);
-				for (let c = 0; c < ch; c++) {
-					const src = buf.getChannelData(c),
-						dst = out.getChannelData(c);
-					for (let i = 0; i < len; i++) dst[i] = src[len - 1 - i];
+			function reverseBuffer(buf) {
+				const out = audioCtx.createBuffer(
+					buf.numberOfChannels,
+					buf.length,
+					buf.sampleRate
+				);
+				for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+					const src = buf.getChannelData(ch),
+						dst = out.getChannelData(ch);
+					for (let i = 0; i < src.length; i++) dst[i] = src[src.length - 1 - i];
 				}
 				return out;
 			}
-
-			/* next aligned start for item */
 			function firstStartAfter(now, item) {
 				const anchor = transportStartTime + item.offsetInBar;
 				if (now <= anchor + 0.01) return anchor;
@@ -656,171 +719,181 @@
 				return anchor + k * item.periodSec;
 			}
 
-			/* ========= FX Graph ========= */
-			function generateImpulse(ctx, seconds = 2.2, decay = 2.6) {
-				const rate = ctx.sampleRate | 0,
-					len = Math.max(1, Math.floor(seconds * rate));
-				const buf = ctx.createBuffer(2, len, rate);
-				for (let ch = 0; ch < 2; ch++) {
-					const d = buf.getChannelData(ch);
-					for (let i = 0; i < len; i++) {
-						const t = i / len;
-						d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
-					}
-				}
-				return buf;
+			/* ========= 5-band EQ ========= */
+			function createEqFor() {
+				const input = audioCtx.createGain();
+				const bands = [
+					{ type: 'lowshelf', freq: 120, gain: 0 },
+					{ type: 'peaking', freq: 350, Q: 1.0, gain: 0 },
+					{ type: 'peaking', freq: 1000, Q: 1.0, gain: 0 },
+					{ type: 'peaking', freq: 3500, Q: 1.0, gain: 0 },
+					{ type: 'highshelf', freq: 8000, gain: 0 },
+				].map((conf) => {
+					const f = audioCtx.createBiquadFilter();
+					f.type = conf.type;
+					f.frequency.value = conf.freq;
+					if (conf.Q) f.Q.value = conf.Q;
+					f.gain.value = conf.gain;
+					return f;
+				});
+				input.connect(bands[0]);
+				for (let i = 0; i < bands.length - 1; i++)
+					bands[i].connect(bands[i + 1]);
+				const output = bands[bands.length - 1];
+				return { input, output, bands };
 			}
-			function createFxGraph(item) {
-				const sum = audioCtx.createGain();
-				sum.connect(item.gainNode);
+
+			/* ========= FX rack ========= */
+			function createGateNode(threshold = 0.02) {
+				const sp = audioCtx.createScriptProcessor(1024, 1, 1);
+				sp.onaudioprocess = (ev) => {
+					const i = ev.inputBuffer.getChannelData(0),
+						o = ev.outputBuffer.getChannelData(0);
+					for (let n = 0; n < i.length; n++) {
+						const s = i[n];
+						o[n] = Math.abs(s) >= threshold ? s : 0;
+					}
+				};
+				return sp;
+			}
+			function createFxRack(item) {
+				const tap = audioCtx.createGain();
 				const dry = audioCtx.createGain();
 				dry.gain.value = 1;
-				dry.connect(sum);
+				tap.connect(dry);
+				dry.connect(item.gainNode);
 
-				function chainEcho() {
-					const input = audioCtx.createGain();
-					const delay = audioCtx.createDelay(1.0);
-					delay.delayTime.value = 0.25;
+				const effects = {};
+				{
+					// Echo
+					const d = audioCtx.createDelay(1.0);
+					d.delayTime.value = 0.25;
 					const fb = audioCtx.createGain();
 					fb.gain.value = 0.35;
-					input.connect(delay);
-					delay.connect(fb);
-					fb.connect(delay);
-					const wet = audioCtx.createGain();
-					wet.gain.value = 0;
-					delay.connect(wet);
-					wet.connect(sum);
-					return { name: 'Echo', input, wet };
-				}
-				function chainReverb() {
-					const input = audioCtx.createGain();
-					const conv = audioCtx.createConvolver();
-					conv.normalize = true;
-					conv.buffer = generateImpulse(audioCtx, 2.2, 2.6);
-					input.connect(conv);
-					const wet = audioCtx.createGain();
-					wet.gain.value = 0;
-					conv.connect(wet);
-					wet.connect(sum);
-					return { name: 'Reverb', input, wet };
-				}
-				function chainChorus() {
-					const input = audioCtx.createGain();
-					const d = audioCtx.createDelay(0.05);
-					d.delayTime.value = 0.02;
-					const lfo = audioCtx.createOscillator();
-					lfo.frequency.value = 1.2;
-					const lfoGain = audioCtx.createGain();
-					lfoGain.gain.value = 0.008;
-					lfo.connect(lfoGain);
-					lfoGain.connect(d.delayTime);
-					lfo.start();
-					input.connect(d);
-					const wet = audioCtx.createGain();
-					wet.gain.value = 0;
-					d.connect(wet);
-					wet.connect(sum);
-					return { name: 'Chorus', input, wet, _lfo: lfo };
-				}
-				function chainFlanger() {
-					const input = audioCtx.createGain();
-					const d = audioCtx.createDelay(0.01);
-					d.delayTime.value = 0.003;
-					const fb = audioCtx.createGain();
-					fb.gain.value = 0.25;
-					const lfo = audioCtx.createOscillator();
-					lfo.frequency.value = 0.25;
-					const lfoGain = audioCtx.createGain();
-					lfoGain.gain.value = 0.0025;
-					lfo.connect(lfoGain);
-					lfoGain.connect(d.delayTime);
-					lfo.start();
-					input.connect(d);
 					d.connect(fb);
 					fb.connect(d);
 					const wet = audioCtx.createGain();
 					wet.gain.value = 0;
+					tap.connect(d);
 					d.connect(wet);
-					wet.connect(sum);
-					return { name: 'Flanger', input, wet, _lfo: lfo };
+					wet.connect(item.gainNode);
+					effects.echo = { wet, enabled: false };
 				}
-				function chainPhaser() {
-					const input = audioCtx.createGain();
-					const stages = 4;
-					let last = input;
-					const lfo = audioCtx.createOscillator();
-					lfo.frequency.value = 0.3;
-					const lfoGain = audioCtx.createGain();
-					lfoGain.gain.value = 400; // Hz swing
-					const filters = [];
-					for (let i = 0; i < stages; i++) {
-						const ap = audioCtx.createBiquadFilter();
-						ap.type = 'allpass';
-						ap.frequency.value = 800;
-						ap.Q.value = 0.707;
-						filters.push(ap);
-						last.connect(ap);
-						last = ap;
+				{
+					// Reverb
+					const conv = audioCtx.createConvolver();
+					conv.normalize = true;
+					const rate = audioCtx.sampleRate | 0,
+						len = Math.max(1, rate * 2.2),
+						ib = audioCtx.createBuffer(2, len, rate);
+					for (let c = 0; c < 2; c++) {
+						const d = ib.getChannelData(c);
+						for (let i = 0; i < len; i++) {
+							const t = i / len;
+							d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.6);
+						}
 					}
-					lfo.connect(lfoGain);
-					filters.forEach((f, i) => {
-						const bias = 400 + i * 120;
-						const adder = audioCtx.createConstantSource();
-						adder.offset.value = bias;
-						adder.start();
-						const sum = audioCtx.createGain();
-						lfoGain.connect(sum);
-						adder.connect(sum);
-						sum.connect(f.frequency);
-					});
+					conv.buffer = ib;
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					tap.connect(conv);
+					conv.connect(wet);
+					wet.connect(item.gainNode);
+					effects.reverb = { wet, enabled: false };
+				}
+				{
+					// Chorus
+					const delay = audioCtx.createDelay(0.05);
+					delay.delayTime.value = 0.02;
+					const lfo = audioCtx.createOscillator();
+					lfo.type = 'sine';
+					lfo.frequency.value = 1.2;
+					const depth = audioCtx.createGain();
+					depth.gain.value = 0.006;
+					lfo.connect(depth);
+					depth.connect(delay.delayTime);
 					lfo.start();
 					const wet = audioCtx.createGain();
 					wet.gain.value = 0;
-					last.connect(wet);
-					wet.connect(sum);
-					return { name: 'Phaser', input, wet, _lfo: lfo };
+					tap.connect(delay);
+					delay.connect(wet);
+					wet.connect(item.gainNode);
+					effects.chorus = { wet, enabled: false };
 				}
-				function chainCompressor() {
-					const input = audioCtx.createGain();
+				{
+					// Flanger
+					const delay = audioCtx.createDelay(0.01);
+					delay.delayTime.value = 0.003;
+					const lfo = audioCtx.createOscillator();
+					lfo.frequency.value = 0.5;
+					const depth = audioCtx.createGain();
+					depth.gain.value = 0.002;
+					lfo.connect(depth);
+					depth.connect(delay.delayTime);
+					lfo.start();
+					const fb = audioCtx.createGain();
+					fb.gain.value = 0.5;
+					delay.connect(fb);
+					fb.connect(delay);
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					tap.connect(delay);
+					delay.connect(wet);
+					wet.connect(item.gainNode);
+					effects.flanger = { wet, enabled: false };
+				}
+				{
+					// Phaser
+					const stages = 3,
+						filters = [];
+					for (let i = 0; i < stages; i++) {
+						const ap = audioCtx.createBiquadFilter();
+						ap.type = 'allpass';
+						ap.frequency.value = 350 * (i + 1);
+						filters.push(ap);
+					}
+					for (let i = 0; i < stages - 1; i++)
+						filters[i].connect(filters[i + 1]);
+					const lfo = audioCtx.createOscillator();
+					lfo.frequency.value = 0.4;
+					const depth = audioCtx.createGain();
+					depth.gain.value = 400;
+					lfo.connect(depth);
+					depth.connect(filters[0].frequency);
+					lfo.start();
+					const wet = audioCtx.createGain();
+					wet.gain.value = 0;
+					tap.connect(filters[0]);
+					filters[filters.length - 1].connect(wet);
+					wet.connect(item.gainNode);
+					effects.phaser = { wet, enabled: false };
+				}
+				{
+					// Compressor
 					const comp = audioCtx.createDynamicsCompressor();
 					comp.threshold.value = -24;
-					comp.ratio.value = 4;
+					comp.knee.value = 30;
+					comp.ratio.value = 6;
 					comp.attack.value = 0.003;
 					comp.release.value = 0.25;
-					comp.knee.value = 30;
-					input.connect(comp);
 					const wet = audioCtx.createGain();
 					wet.gain.value = 0;
+					tap.connect(comp);
 					comp.connect(wet);
-					wet.connect(sum);
-					return { name: 'Compressor', input, wet };
+					wet.connect(item.gainNode);
+					effects.compressor = { wet, enabled: false };
 				}
-				function chainGate() {
-					const input = audioCtx.createGain();
-					const comp = audioCtx.createDynamicsCompressor();
-					comp.threshold.value = -50;
-					comp.ratio.value = 20;
-					comp.attack.value = 0.001;
-					comp.release.value = 0.06;
-					comp.knee.value = 0;
-					input.connect(comp);
+				{
+					// Gate
+					const gate = createGateNode(0.03);
 					const wet = audioCtx.createGain();
 					wet.gain.value = 0;
-					comp.connect(wet);
-					wet.connect(sum);
-					return { name: 'Gate / Expander', input, wet };
+					tap.connect(gate);
+					gate.connect(wet);
+					wet.connect(item.gainNode);
+					effects.gate = { wet, enabled: false };
 				}
-
-				const chains = [
-					chainEcho(),
-					chainReverb(),
-					chainChorus(),
-					chainFlanger(),
-					chainPhaser(),
-					chainCompressor(),
-					chainGate(),
-				];
-				return { sum, dry, chains, reverse: false };
+				return { tap, dry, effects, reverse: false };
 			}
 
 			/* ========= Scheduler ========= */
@@ -834,21 +907,22 @@
 					schedTimer = null;
 				}
 			}
-
 			function startOneShot(item, when, dur) {
 				const src = audioCtx.createBufferSource();
-				src.buffer = item.fxGraph.reverse
-					? item.revBuffer || item.buffer
+				const buf = item.rack.reverse
+					? item.reversedBuffer ||
+					  (item.reversedBuffer = reverseBuffer(item.buffer))
 					: item.buffer;
+				src.buffer = buf;
 				src.loop = false;
-				// connect to dry + each fx input
-				src.connect(item.fxGraph.dry);
-				for (const fx of item.fxGraph.chains) src.connect(fx.input);
-				src.start(when, 0, Math.max(0.001, Math.min(dur, src.buffer.duration)));
+				/* signal path: source -> EQ -> FX tap -> (FX/dry) -> item.gainNode -> master */
+				src.connect(item.eq.input);
+				src.start(when, 0, Math.max(0.001, Math.min(dur, buf.duration)));
 				item.active.add(src);
-				src.onended = () => item.active.delete(src);
+				src.onended = () => {
+					item.active.delete(src);
+				};
 			}
-
 			function schedulerTick() {
 				if (
 					!audioCtx ||
@@ -873,16 +947,16 @@
 			function makeLoop(buffer) {
 				const id = `loop-${++loopCounter}`;
 				const gainNode = audioCtx.createGain();
-				gainNode.gain.value = 1;
+				gainNode.gain.value = 1.0;
 				gainNode.connect(masterGain);
 				const el = renderSampleItem({ id, duration: buffer.duration });
 				return {
 					id,
 					buffer,
-					revBuffer: null,
+					reversedBuffer: null,
 					gainNode,
 					el,
-					userGain: 1,
+					userGain: 1.0,
 					muted: false,
 					solo: false,
 					offsetInBar: 0,
@@ -891,12 +965,14 @@
 					periodSec: buffer.duration,
 					nextStartTime: null,
 					active: new Set(),
-					fxGraph: null,
+					eq: null,
+					rack: null,
 				};
 			}
 			async function addLoop(buffer) {
 				ensureAudio();
 				buffer = await resampleToContext(buffer, audioCtx.sampleRate);
+
 				if (masterLenSec == null) {
 					masterLenSec = buffer.duration;
 					buffer = padToMultiple(buffer, masterLenSec, audioCtx);
@@ -904,17 +980,22 @@
 				} else {
 					buffer = padToMultiple(buffer, masterLenSec, audioCtx);
 				}
+
 				const item = makeLoop(buffer);
 				item.buffer = buffer;
-				item.revBuffer = reverseBuffer(audioCtx, buffer);
 				item.periodBars = Math.max(
 					1,
 					Math.round(buffer.duration / masterLenSec)
 				);
 				item.periodSec = item.periodBars * masterLenSec;
-				item.fxGraph = createFxGraph(item);
+
+				item.eq = createEqFor();
+				item.rack = createFxRack(item);
+				/* connect EQ -> FX tap */
+				item.eq.output.connect(item.rack.tap);
 
 				loops.set(item.id, item);
+
 				item.nextStartTime = firstStartAfter(audioCtx.currentTime, item);
 				startScheduler();
 
@@ -932,19 +1013,6 @@
 				const name = document.createElement('div');
 				name.className = 'name';
 				name.textContent = `Sample ${id.split('-')[1]}`;
-				// editable name on Enter
-				name.contentEditable = 'true';
-				name.addEventListener('keydown', (e) => {
-					if (e.key === 'Enter') {
-						e.preventDefault();
-						name.blur();
-					}
-				});
-				name.addEventListener('blur', () => {
-					name.textContent =
-						name.textContent.trim() || `Sample ${id.split('-')[1]}`;
-				});
-
 				const info = document.createElement('div');
 				info.className = 'info';
 				info.textContent = `${duration.toFixed(2)} s loop`;
@@ -999,24 +1067,30 @@
 				solo.title = 'Solo';
 				solo.setAttribute('aria-pressed', 'false');
 				solo.textContent = '🎧';
+				const eqBtn = document.createElement('button');
+				eqBtn.className = 'eq';
+				eqBtn.title = 'EQ';
+				eqBtn.setAttribute('aria-label', 'EQ');
+				eqBtn.textContent = 'EQ';
+				const fxBtn = document.createElement('button');
+				fxBtn.className = 'fx';
+				fxBtn.title = 'FX';
+				fxBtn.setAttribute('aria-label', 'FX');
+				fxBtn.textContent = 'FX';
 				const del = document.createElement('button');
 				del.className = 'del';
 				del.title = 'Delete loop';
 				del.setAttribute('aria-label', 'Delete loop');
 				del.textContent = '✕';
 
-				const fxbtn = document.createElement('button');
-				fxbtn.className = 'fxbtn';
-				fxbtn.title = 'FX';
-				fxbtn.textContent = 'FX';
-
 				row.appendChild(labelCol);
 				row.appendChild(vcol);
 				row.appendChild(play);
 				row.appendChild(mute);
 				row.appendChild(solo);
+				row.appendChild(eqBtn);
+				row.appendChild(fxBtn);
 				row.appendChild(del);
-				row.appendChild(fxbtn);
 				samplesEl.appendChild(row);
 
 				/* events */
@@ -1039,6 +1113,7 @@
 				solo.addEventListener('click', () => toggleSolo(id));
 				del.addEventListener('click', () => removeLoop(id));
 
+				// Play now (slice to next boundary), maintain grid alignment
 				play.addEventListener('click', () => {
 					const it = loops.get(id);
 					if (!it || !audioCtx) return;
@@ -1048,14 +1123,18 @@
 						} catch (_) {}
 					}
 					it.active.clear();
-					const now = audioCtx.currentTime;
-					const next = firstStartAfter(now, it);
+					const now = audioCtx.currentTime,
+						next = firstStartAfter(now, it);
 					const dur = Math.max(0.01, next - now);
-					startOneShot(it, now + 0.01, Math.min(dur, it.buffer.duration));
+					const buf = it.rack.reverse
+						? it.reversedBuffer ||
+						  (it.reversedBuffer = reverseBuffer(it.buffer))
+						: it.buffer;
+					startOneShot(it, now + 0.01, Math.min(dur, buf.duration));
 					it.nextStartTime = next;
 				});
 
-				// time-shift drag: offset in bar, truncate from start (handle never overdrawn)
+				/* Time shift handle */
 				function pxToOffset(clientX) {
 					const it = loops.get(id);
 					if (!it || masterLenSec == null) return 0;
@@ -1073,22 +1152,10 @@
 						(it.offsetInBar / it.periodSec) * 100
 					}%`;
 				}
-				function updateFillUI(it, now) {
-					if (!it || !it.bar || transportStartTime == null) return;
-					const leftFrac = it.offsetInBar / it.periodSec;
-					const dur = it.periodSec - it.offsetInBar;
-					const anchor = transportStartTime + it.offsetInBar;
-					const k = Math.floor((now - anchor) / it.periodSec);
-					const cycleStart = anchor + Math.max(0, k) * it.periodSec;
-					const elapsed = Math.max(0, now - cycleStart);
-					const prog = Math.min(elapsed, dur);
-					it.bar.fill.style.left = `${leftFrac * 100}%`;
-					it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
-				}
-				function dragAt(clientX) {
+				function dragAt(x) {
 					const it = loops.get(id);
 					if (!it) return;
-					it.offsetInBar = pxToOffset(clientX);
+					it.offsetInBar = pxToOffset(x);
 					setHandle(it);
 					updateFillUI(it, audioCtx ? audioCtx.currentTime : 0);
 				}
@@ -1129,7 +1196,6 @@
 				prog.addEventListener('pointerup', onUp);
 				prog.addEventListener('pointercancel', onUp);
 				handle.addEventListener('pointerdown', onDown);
-				// mouse fallback
 				prog.addEventListener('mousedown', (e) => {
 					onDown(e);
 					const mm = (ev) => onMove(ev);
@@ -1142,16 +1208,6 @@
 					document.addEventListener('mouseup', mu, { once: true });
 				});
 
-				// FX button opens modal
-				fxbtn.addEventListener('click', () => {
-					const it = loops.get(id);
-					if (!it) return;
-					openFxModal(
-						it,
-						name.textContent.trim() || `Sample ${id.split('-')[1]}`
-					);
-				});
-
 				queueMicrotask(() => {
 					const it = loops.get(id);
 					if (it) {
@@ -1160,51 +1216,50 @@
 					}
 				});
 
+				eqBtn.addEventListener('click', () => {
+					const it = loops.get(id);
+					if (!it) return;
+					openEqModal(it);
+				});
+				fxBtn.addEventListener('click', () => {
+					const it = loops.get(id);
+					if (!it) return;
+					openFxModal(it);
+				});
+
 				return row;
 			}
 
-			/* ===== UI ticker for progress ===== */
-			let uiRAF = null;
-			function ensureUiTicker() {
-				if (!uiRAF) uiRAF = requestAnimationFrame(updateBars);
+			/* ======= VISUAL progress ======= */
+			function updateFillUI(it, now) {
+				if (!it || !it.bar || transportStartTime == null) return;
+				const leftFrac = it.offsetInBar / it.periodSec,
+					dur = it.periodSec - it.offsetInBar;
+				const anchor = transportStartTime + it.offsetInBar,
+					k = Math.floor((now - anchor) / it.periodSec),
+					cycleStart = anchor + Math.max(0, k) * it.periodSec;
+				const elapsed = Math.max(0, now - cycleStart),
+					prog = Math.min(elapsed, dur);
+				it.bar.fill.style.left = `${leftFrac * 100}%`;
+				it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
 			}
-			function updateBars() {
-				const now = !audioCtx ? 0 : audioCtx.currentTime;
-				for (const [, it] of loops) {
-					// updateFillUI inline replica
-					if (!it || !it.bar || transportStartTime == null) continue;
-					const leftFrac = it.offsetInBar / it.periodSec;
-					const dur = it.periodSec - it.offsetInBar;
-					const anchor = transportStartTime + it.offsetInBar;
-					const k = Math.floor((now - anchor) / it.periodSec);
-					const cycleStart = anchor + Math.max(0, k) * it.periodSec;
-					const elapsed = Math.max(0, now - cycleStart);
-					const prog = Math.min(elapsed, dur);
-					it.bar.fill.style.left = `${leftFrac * 100}%`;
-					it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
-				}
-				uiRAF = requestAnimationFrame(updateBars);
-			}
-			ensureUiTicker();
 
 			/* ========= Solo helpers ========= */
 			function updateSoloButtonsUI() {
 				for (const [, it] of loops) {
 					const row = document.getElementById(it.id);
 					if (!row) continue;
-					const btn = row.querySelector('.solo');
-					if (!btn) continue;
-					btn.classList.toggle('active', !!it.solo);
-					btn.setAttribute('aria-pressed', String(!!it.solo));
+					const b = row.querySelector('.solo');
+					if (!b) continue;
+					b.classList.toggle('active', !!it.solo);
+					b.setAttribute('aria-pressed', String(!!it.solo));
 				}
 			}
 			function toggleSolo(id) {
-				const current = loops.get(id);
-				if (!current) return;
-				const enable = !current.solo;
-				for (const [, it] of loops) {
-					it.solo = enable ? it.id === id : false;
-				}
+				const cur = loops.get(id);
+				if (!cur) return;
+				const enable = !cur.solo;
+				for (const [, it] of loops) it.solo = enable ? it.id === id : false;
 				updateSoloButtonsUI();
 				updateAllGains();
 			}
@@ -1286,8 +1341,8 @@
 			function createWavFromBuffer(buf) {
 				const inter = bufferToInterleavedFloat32(buf),
 					sr = buf.sampleRate | 0,
-					ch = buf.numberOfChannels | 0;
-				const bps = 2,
+					ch = buf.numberOfChannels | 0,
+					bps = 2,
 					blockAlign = ch * bps,
 					byteRate = sr * blockAlign,
 					dataBytes = inter.length * bps;
@@ -1417,6 +1472,18 @@
 			}
 			mixRecBtn.addEventListener('click', toggleMixRecording);
 
+			/* ========= UI ticker ========= */
+			let uiRAF = null;
+			function ensureUiTicker() {
+				if (!uiRAF) uiRAF = requestAnimationFrame(updateBars);
+			}
+			function updateBars() {
+				const now = !audioCtx ? 0 : audioCtx.currentTime;
+				for (const [, it] of loops) updateFillUI(it, now);
+				uiRAF = requestAnimationFrame(updateBars);
+			}
+			ensureUiTicker();
+
 			/* ========= Keyboard ========= */
 			function isInteractive(el) {
 				if (!el) return false;
@@ -1432,12 +1499,19 @@
 			}
 			window.addEventListener('keydown', (e) => {
 				const isSpace = e.code === 'Space' || e.key === ' ';
-				if (!isSpace) return;
-				const el = document.activeElement;
-				if (isInteractive(el)) return;
-				e.preventDefault();
-				if (e.shiftKey) haltBtn.click();
-				else recToggleBtn.click();
+				if (isSpace) {
+					const el = document.activeElement;
+					if (isInteractive(el)) return;
+					e.preventDefault();
+					if (e.shiftKey) haltBtn.click();
+					else recToggleBtn.click();
+				}
+				if (e.key === 'Escape' || e.code === 'Escape') {
+					if (eqBackdrop.getAttribute('aria-hidden') === 'false')
+						closeEqModal();
+					if (fxBackdrop.getAttribute('aria-hidden') === 'false')
+						closeFxModal();
+				}
 			});
 
 			/* ========= Record toggle ========= */
@@ -1511,126 +1585,162 @@
 				}
 			}
 
-			/* ========= FX Modal ========= */
-			function openFxModal(item, title) {
-				fxModalItem = item;
-				fxTitle.textContent = `FX — ${title}`;
-				fxListEl.innerHTML = '';
-
-				// first row: Reverse (toggle)
-				const revRow = document.createElement('div');
-				revRow.className = 'fx-row';
-				const revLabel = document.createElement('label');
-				const revChk = document.createElement('input');
-				revChk.type = 'checkbox';
-				revChk.checked = !!item.fxGraph.reverse;
-				const revText = document.createElement('span');
-				revText.textContent = 'Reverse (toggle)';
-				const dash = document.createElement('span');
-				dash.className = 'small';
-				dash.textContent = '—';
-				revLabel.appendChild(revChk);
-				revLabel.appendChild(revText);
-				revLabel.appendChild(dash);
-				const revSpacer = document.createElement('div'); // nothing at right
-				revRow.appendChild(revLabel);
-				revRow.appendChild(revSpacer);
-				fxListEl.appendChild(revRow);
-				revChk.addEventListener('change', () => {
-					item.fxGraph.reverse = revChk.checked;
-				});
-
-				// remaining FX chains with independent wet sliders
-				const names = [
-					'Echo',
-					'Reverb',
-					'Chorus',
-					'Flanger',
-					'Phaser',
-					'Compressor',
-					'Gate / Expander',
+			/* ========= EQ modal ========= */
+			let eqCurrentItem = null;
+			function openEqModal(item) {
+				eqCurrentItem = item;
+				eqTitle.textContent = `EQ — ${
+					document.querySelector('#' + item.id + ' .name')?.textContent ||
+					'Sample'
+				}`;
+				eqGrid.innerHTML = '';
+				const labels = [
+					{ t: 'Low', s: '120 Hz', idx: 0 },
+					{ t: 'Low-Mid', s: '350 Hz', idx: 1 },
+					{ t: 'Mid', s: '1 kHz', idx: 2 },
+					{ t: 'High-Mid', s: '3.5 kHz', idx: 3 },
+					{ t: 'High', s: '8 kHz', idx: 4 },
 				];
-				for (let i = 0; i < names.length; i++) {
-					const chain = item.fxGraph.chains[i];
-					const row = document.createElement('div');
-					row.className = 'fx-row';
-					const lab = document.createElement('label');
+				labels.forEach(({ t, s, idx }) => {
+					const band = document.createElement('div');
+					band.className = 'eq-band';
+					const h = document.createElement('h4');
+					h.textContent = t;
+					const sub = document.createElement('div');
+					sub.className = 'sub';
+					sub.textContent = s;
+					const sl = document.createElement('input');
+					sl.type = 'range';
+					sl.min = '-12';
+					sl.max = '12';
+					sl.step = '0.5';
+					sl.value = String(item.eq.bands[idx].gain.value);
+					sl.className = 'vslider';
+					const db = document.createElement('div');
+					db.className = 'db';
+					db.textContent = `${Number(sl.value).toFixed(1)} dB`;
+					sl.addEventListener('input', () => {
+						const v = parseFloat(sl.value);
+						item.eq.bands[idx].gain.value = v;
+						db.textContent = `${v.toFixed(1)} dB`;
+					});
+					band.appendChild(h);
+					band.appendChild(sub);
+					band.appendChild(sl);
+					band.appendChild(db);
+					eqGrid.appendChild(band);
+				});
+				eqBackdrop.style.display = 'flex';
+				eqBackdrop.setAttribute('aria-hidden', 'false');
+			}
+			function closeEqModal() {
+				eqBackdrop.style.display = 'none';
+				eqBackdrop.setAttribute('aria-hidden', 'true');
+				eqCurrentItem = null;
+			}
+			eqClose.addEventListener('click', closeEqModal);
+			eqBackdrop.addEventListener('click', (e) => {
+				if (e.target === eqBackdrop) closeEqModal();
+			});
+			eqReset.addEventListener('click', () => {
+				if (!eqCurrentItem) return;
+				eqCurrentItem.eq.bands.forEach((b) => (b.gain.value = 0));
+				[...eqGrid.querySelectorAll('.vslider')].forEach((s) => {
+					s.value = '0';
+					const db = s.parentElement.querySelector('.db');
+					if (db) db.textContent = '0.0 dB';
+				});
+			});
+
+			/* ========= FX modal ========= */
+			let fxCurrentItem = null;
+			const FX_DEFS = [
+				{ key: 'reverse', label: 'Reverse (toggle)', hasWet: false },
+				{ key: 'echo', label: 'Echo', hasWet: true },
+				{ key: 'reverb', label: 'Reverb', hasWet: true },
+				{ key: 'chorus', label: 'Chorus', hasWet: true },
+				{ key: 'flanger', label: 'Flanger', hasWet: true },
+				{ key: 'phaser', label: 'Phaser', hasWet: true },
+				{ key: 'compressor', label: 'Compressor', hasWet: true },
+				{ key: 'gate', label: 'Gate / Expander', hasWet: true },
+			];
+			function openFxModal(item) {
+				fxCurrentItem = item;
+				fxTitle.textContent = `FX — ${
+					document.querySelector('#' + item.id + ' .name')?.textContent ||
+					'Sample'
+				}`;
+				fxList.innerHTML = '';
+				FX_DEFS.forEach((def) => {
+					const nameCell = document.createElement('div');
+					nameCell.className = 'fx-name';
 					const cb = document.createElement('input');
 					cb.type = 'checkbox';
-					cb.checked = chain.wet.gain.value > 0.0001;
-					const txt = document.createElement('span');
-					txt.textContent = names[i];
-					lab.appendChild(cb);
-					lab.appendChild(txt);
-					const slider = document.createElement('input');
-					slider.type = 'range';
-					slider.min = '0';
-					slider.max = '100';
-					slider.step = '1';
-					slider.value = Math.round(chain.wet.gain.value * 100);
-					row.appendChild(lab);
-					row.appendChild(slider);
-					fxListEl.appendChild(row);
+					if (def.key === 'reverse') cb.checked = !!item.rack.reverse;
+					else cb.checked = !!item.rack.effects[def.key]?.enabled;
+					const lab = document.createElement('label');
+					lab.textContent = def.label;
+					nameCell.appendChild(cb);
+					nameCell.appendChild(lab);
+					fxList.appendChild(nameCell);
 
-					function apply() {
-						const wet = cb.checked ? parseInt(slider.value, 10) / 100 : 0;
-						chain.wet.gain.value = wet;
+					const sliderCell = document.createElement('div');
+					if (def.hasWet) {
+						const sl = document.createElement('input');
+						sl.type = 'range';
+						sl.min = '0';
+						sl.max = '100';
+						sl.value = String(
+							Math.round((item.rack.effects[def.key].wet.gain.value || 0) * 100)
+						);
+						sl.addEventListener('input', () => {
+							const w = parseInt(sl.value, 10) / 100;
+							item.rack.effects[def.key].wet.gain.value = w;
+							if (w > 0) {
+								item.rack.effects[def.key].enabled = true;
+								cb.checked = true;
+							}
+						});
+						cb.addEventListener('change', () => {
+							const enabled = cb.checked;
+							item.rack.effects[def.key].enabled = enabled;
+							if (!enabled) item.rack.effects[def.key].wet.gain.value = 0;
+							else if (item.rack.effects[def.key].wet.gain.value === 0)
+								item.rack.effects[def.key].wet.gain.value = 0.3;
+							sl.value = String(
+								Math.round(item.rack.effects[def.key].wet.gain.value * 100)
+							);
+						});
+						sliderCell.appendChild(sl);
+					} else {
+						sliderCell.textContent = '—';
+						cb.addEventListener('change', () => {
+							item.rack.reverse = cb.checked;
+						});
 					}
-					cb.addEventListener('change', apply);
-					slider.addEventListener('input', apply);
-				}
-
-				fxModal.classList.add('show');
-				fxModal.setAttribute('aria-hidden', 'false');
-			}
-			fxCloseBtn.addEventListener('click', closeFxModal);
-			fxAllOffBtn.addEventListener('click', () => {
-				if (!fxModalItem) return;
-				for (const ch of fxModalItem.fxGraph.chains) {
-					ch.wet.gain.value = 0;
-				}
-				// also uncheck UI
-				fxListEl.querySelectorAll('input[type="checkbox"]').forEach((el, i) => {
-					if (i > 0) el.checked = false;
-				}); // i=0 is Reverse
-				fxListEl.querySelectorAll('input[type="range"]').forEach((el) => {
-					el.value = '0';
+					fxList.appendChild(sliderCell);
 				});
-			});
+				fxBackdrop.style.display = 'flex';
+				fxBackdrop.setAttribute('aria-hidden', 'false');
+			}
 			function closeFxModal() {
-				fxModal.classList.remove('show');
-				fxModal.setAttribute('aria-hidden', 'true');
-				fxModalItem = null;
+				fxBackdrop.style.display = 'none';
+				fxBackdrop.setAttribute('aria-hidden', 'true');
+				fxCurrentItem = null;
 			}
-			fxModal.addEventListener('click', (e) => {
-				if (e.target === fxModal) closeFxModal();
-			});
-			window.addEventListener('keydown', (e) => {
-				if (e.key === 'Escape' && fxModal.classList.contains('show'))
-					closeFxModal();
-			});
-
-			/* ========= Solo UI again (for completeness) ========= */
-			function updateSoloButtonsUI() {
-				for (const [, it] of loops) {
-					const row = document.getElementById(it.id);
-					if (!row) continue;
-					const btn = row.querySelector('.solo');
-					if (!btn) continue;
-					btn.classList.toggle('active', !!it.solo);
-					btn.setAttribute('aria-pressed', String(!!it.solo));
+			fxClose.addEventListener('click', closeFxModal);
+			fxAllOff.addEventListener('click', () => {
+				if (!fxCurrentItem) return;
+				for (const k of Object.keys(fxCurrentItem.rack.effects)) {
+					fxCurrentItem.rack.effects[k].enabled = false;
+					fxCurrentItem.rack.effects[k].wet.gain.value = 0;
 				}
-			}
-			function toggleSolo(id) {
-				const current = loops.get(id);
-				if (!current) return;
-				const enable = !current.solo;
-				for (const [, it] of loops) {
-					it.solo = enable ? it.id === id : false;
-				}
-				updateSoloButtonsUI();
-				updateAllGains();
-			}
+				fxCurrentItem.rack.reverse = false;
+				openFxModal(fxCurrentItem);
+			});
+			fxBackdrop.addEventListener('click', (e) => {
+				if (e.target === fxBackdrop) closeFxModal();
+			});
 		</script>
 	</body>
 </html>
