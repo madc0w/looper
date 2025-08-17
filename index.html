@@ -101,7 +101,6 @@
 			}
 			.sample {
 				display: grid;
-				/* label | controls | play | mute | solo | EQ | FX | X */
 				grid-template-columns: 1fr minmax(220px, 34%) 42px 42px 42px 42px 42px 42px;
 				gap: 10px;
 				align-items: center;
@@ -269,7 +268,6 @@
 				text-align: center;
 			}
 
-			/* ---------- Modal (shared) ---------- */
 			.modal-backdrop {
 				position: fixed;
 				inset: 0;
@@ -313,7 +311,6 @@
 				background: #353b5a;
 			}
 
-			/* ---------- EQ modal ---------- */
 			.eq-grid {
 				display: grid;
 				grid-template-columns: repeat(5, 1fr);
@@ -348,7 +345,6 @@
 				width: 28px;
 				height: 160px;
 				margin: 6px 0;
-				/* standards-friendly vertical range slider */
 				writing-mode: vertical-lr;
 				direction: rtl;
 				background: transparent;
@@ -356,10 +352,9 @@
 				accent-color: var(--accent);
 			}
 
-			/* ---------- FX modal ---------- */
 			.fx-list {
 				display: grid;
-				grid-template-columns: max-content 1fr; /* labels and sliders close together */
+				grid-template-columns: max-content 1fr;
 				column-gap: 14px;
 				row-gap: 12px;
 				align-items: center;
@@ -403,7 +398,7 @@
 			</div>
 		</div>
 
-		<!-- ---------- EQ Modal ---------- -->
+		<!-- EQ Modal -->
 		<div
 			id="eqBackdrop"
 			class="modal-backdrop"
@@ -423,7 +418,7 @@
 			</div>
 		</div>
 
-		<!-- ---------- FX Modal ---------- -->
+		<!-- FX Modal -->
 		<div
 			id="fxBackdrop"
 			class="modal-backdrop"
@@ -454,7 +449,7 @@
 				recordingChunks = [];
 			let loopCounter = 0;
 
-			/* Oscilloscope state (declare ONCE) */
+			/* Scope */
 			let micSource = null,
 				analyser = null,
 				scopeRAF = null,
@@ -462,7 +457,7 @@
 				isDrawing = false;
 			let recStartPerf = 0;
 
-			/* Transport grid */
+			/* Transport */
 			let masterLenSec = null;
 			let transportStartTime = null;
 
@@ -897,16 +892,6 @@
 			}
 
 			/* ========= Scheduler ========= */
-			function startScheduler() {
-				if (!schedTimer)
-					schedTimer = setInterval(schedulerTick, SCHEDULE_INTERVAL);
-			}
-			function stopScheduler() {
-				if (schedTimer) {
-					clearInterval(schedTimer);
-					schedTimer = null;
-				}
-			}
 			function startOneShot(item, when, dur) {
 				const src = audioCtx.createBufferSource();
 				const buf = item.rack.reverse
@@ -915,7 +900,6 @@
 					: item.buffer;
 				src.buffer = buf;
 				src.loop = false;
-				/* signal path: source -> EQ -> FX tap -> (FX/dry) -> item.gainNode -> master */
 				src.connect(item.eq.input);
 				src.start(when, 0, Math.max(0.001, Math.min(dur, buf.duration)));
 				item.active.add(src);
@@ -940,6 +924,16 @@
 						startOneShot(item, item.nextStartTime, dur);
 						item.nextStartTime += item.periodSec;
 					}
+				}
+			}
+			function startScheduler() {
+				if (!schedTimer)
+					schedTimer = setInterval(schedulerTick, SCHEDULE_INTERVAL);
+			}
+			function stopScheduler() {
+				if (schedTimer) {
+					clearInterval(schedTimer);
+					schedTimer = null;
 				}
 			}
 
@@ -991,11 +985,9 @@
 
 				item.eq = createEqFor();
 				item.rack = createFxRack(item);
-				/* connect EQ -> FX tap */
 				item.eq.output.connect(item.rack.tap);
 
 				loops.set(item.id, item);
-
 				item.nextStartTime = firstStartAfter(audioCtx.currentTime, item);
 				startScheduler();
 
@@ -1093,7 +1085,6 @@
 				row.appendChild(del);
 				samplesEl.appendChild(row);
 
-				/* events */
 				levelSlider.addEventListener('input', () => {
 					const it = loops.get(id);
 					if (it) {
@@ -1113,7 +1104,6 @@
 				solo.addEventListener('click', () => toggleSolo(id));
 				del.addEventListener('click', () => removeLoop(id));
 
-				// Play now (slice to next boundary), maintain grid alignment
 				play.addEventListener('click', () => {
 					const it = loops.get(id);
 					if (!it || !audioCtx) return;
@@ -1134,7 +1124,6 @@
 					it.nextStartTime = next;
 				});
 
-				/* Time shift handle */
 				function pxToOffset(clientX) {
 					const it = loops.get(id);
 					if (!it || masterLenSec == null) return 0;
@@ -1230,7 +1219,7 @@
 				return row;
 			}
 
-			/* ======= VISUAL progress ======= */
+			/* ======= Visual progress ======= */
 			function updateFillUI(it, now) {
 				if (!it || !it.bar || transportStartTime == null) return;
 				const leftFrac = it.offsetInBar / it.periodSec,
@@ -1244,7 +1233,7 @@
 				it.bar.fill.style.width = `${(prog / it.periodSec) * 100}%`;
 			}
 
-			/* ========= Solo helpers ========= */
+			/* ========= Solo ========= */
 			function updateSoloButtonsUI() {
 				for (const [, it] of loops) {
 					const row = document.getElementById(it.id);
@@ -1409,6 +1398,10 @@
 			async function startMixRecording() {
 				ensureAudio();
 				await audioCtx.resume();
+				/* ensure audible and button label correct */
+				masterGain.gain.setTargetAtTime(1, audioCtx.currentTime, 0.01);
+				updateHaltButtonUI(); // ensure UI reflects running state
+
 				ensureMixStream();
 				try {
 					const opts = {},
