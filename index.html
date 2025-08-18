@@ -407,6 +407,15 @@
 					<button id="mixRecBtn" class="btn record" aria-pressed="false">
 						⏺ Record Mix
 					</button>
+					<!-- New: Export / Import -->
+					<button id="exportBtn" class="btn halt">⤓ Export</button>
+					<button id="importBtn" class="btn halt">⤒ Import</button>
+					<input
+						id="importInput"
+						type="file"
+						accept="application/json"
+						style="display: none"
+					/>
 				</div>
 				<div id="status" class="status">Ready.</div>
 				<canvas id="scope" class="scope" aria-hidden="true"></canvas>
@@ -508,6 +517,9 @@
 			const recToggleBtn = document.getElementById('recToggleBtn');
 			const haltBtn = document.getElementById('haltBtn');
 			const mixRecBtn = document.getElementById('mixRecBtn');
+			const exportBtn = document.getElementById('exportBtn');
+			const importBtn = document.getElementById('importBtn');
+			const importInput = document.getElementById('importInput');
 			const statusEl = document.getElementById('status');
 			const samplesEl = document.getElementById('samples');
 			const scopeCanvas = document.getElementById('scope');
@@ -540,7 +552,6 @@
 				return mediaStream;
 			}
 			function pickMimeType() {
-				// Prefer OGG Opus first (better Firefox compat), then WebM Opus
 				const c = [
 					'audio/ogg;codecs=opus',
 					'audio/webm;codecs=opus',
@@ -1285,7 +1296,7 @@
 				updateAllGains();
 			}
 
-			/* ========= Remove ========= */
+			/* ========= Remove / reset ========= */
 			function removeLoop(id) {
 				const it = loops.get(id);
 				if (!it) return;
@@ -1301,6 +1312,23 @@
 				if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el);
 				loops.delete(id);
 				setStatus('Loop removed.');
+			}
+			function clearAllLoops() {
+				for (const [, it] of loops) {
+					for (const s of it.active) {
+						try {
+							s.stop(0);
+						} catch (_) {}
+					}
+					it.active.clear();
+					try {
+						it.gainNode.disconnect();
+					} catch (_) {}
+					if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el);
+				}
+				loops.clear();
+				masterLenSec = null;
+				transportStartTime = null;
 			}
 
 			/* ========= Halt / resume ========= */
@@ -1759,6 +1787,190 @@
 			eqClose.addEventListener('click', closeEq);
 			eqBack.addEventListener('click', (e) => {
 				if (e.target === eqBack) closeEq();
+			});
+
+			/* ========= Export / Import ========= */
+			function blobToDataURL(blob) {
+				return new Promise((resolve, reject) => {
+					const r = new FileReader();
+					r.onload = () => resolve(r.result);
+					r.onerror = reject;
+					r.readAsDataURL(blob);
+				});
+			}
+			function dataURLToArrayBuffer(dataURL) {
+				const b64 = dataURL.split(',')[1];
+				const byteStr = atob(b64);
+				const len = byteStr.length;
+				const buf = new ArrayBuffer(len);
+				const arr = new Uint8Array(buf);
+				for (let i = 0; i < len; i++) arr[i] = byteStr.charCodeAt(i);
+				return buf;
+			}
+			async function exportProject() {
+				ensureAudio();
+				const project = {
+					version: 1,
+					masterLenSec: masterLenSec,
+					created: Date.now(),
+					loops: [],
+				};
+				// Preserve insertion order
+				for (const [, it] of loops) {
+					const wav = createWavFromBuffer(it.buffer);
+					const dataURL = await blobToDataURL(wav);
+					project.loops.push({
+						name: it.name,
+						userGain: it.userGain,
+						muted: !!it.muted,
+						solo: !!it.solo,
+						offsetInBar: it.offsetInBar,
+						eqGains: it.eq ? it.eq.bands.map((b) => b.gainDb) : [0, 0, 0, 0, 0],
+						fx: {
+							reverse: !!it.fx.reverse,
+							wet: {
+								echo: it.fx.modules.echo.wet.gain.value,
+								reverb: it.fx.modules.reverb.wet.gain.value,
+								chorus: it.fx.modules.chorus.wet.gain.value,
+								flanger: it.fx.modules.flanger.wet.gain.value,
+								phaser: it.fx.modules.phaser.wet.gain.value,
+								comp: it.fx.modules.comp.wet.gain.value,
+								gate: it.fx.modules.gate.wet.gain.value,
+							},
+						},
+						audio: dataURL,
+					});
+				}
+				const blob = new Blob([JSON.stringify(project)], {
+					type: 'application/json',
+				});
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `looper_project_${new Date()
+					.toISOString()
+					.replace(/[:.]/g, '-')}.json`;
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+				setTimeout(() => URL.revokeObjectURL(url), 4000);
+				setStatus('Project exported.');
+			}
+			async function importProjectFromObject(obj) {
+				ensureAudio();
+				await audioCtx.resume();
+				updateHaltButtonUI();
+				// Replace current session
+				clearAllLoops();
+
+				// Restore bar length before adding loops so alignment matches the file
+				if (typeof obj.masterLenSec === 'number' && obj.masterLenSec > 0) {
+					masterLenSec = obj.masterLenSec;
+				}
+				transportStartTime = audioCtx.currentTime + 0.25;
+
+				let soloToSet = null;
+				for (const l of obj.loops || []) {
+					try {
+						const ab = dataURLToArrayBuffer(l.audio);
+						const buf = await decodeSafely(ab);
+						await addLoop(buf); // constructs item, fx, eq, ui, etc.
+						// Last added loop:
+						const it = [...loops.values()][loops.size - 1];
+
+						// Restore name
+						it.name = l.name || it.name;
+						const row = document.getElementById(it.id);
+						const nameEl = row.querySelector('.name');
+						if (nameEl) nameEl.textContent = it.name;
+
+						// Level
+						it.userGain = typeof l.userGain === 'number' ? l.userGain : 1;
+						applyGain(it);
+						const lvl = row.querySelector('.vcol input[type="range"]');
+						if (lvl) lvl.value = String(Math.round(it.userGain * 100));
+
+						// Mute
+						it.muted = !!l.muted;
+						const mute = row.querySelector('.mute');
+						if (mute) {
+							mute.classList.toggle('active', it.muted);
+							mute.setAttribute('aria-pressed', String(it.muted));
+							mute.textContent = it.muted ? '🔇' : '🔈';
+						}
+
+						// Time shift
+						it.offsetInBar = Math.max(
+							0,
+							Math.min(masterLenSec || it.periodSec, l.offsetInBar || 0)
+						);
+						if (it.bar) {
+							it.bar.handle.style.left = `${
+								(it.offsetInBar / it.periodSec) * 100
+							}%`;
+						}
+
+						// FX
+						if (l.fx && it.fx) {
+							it.fx.reverse = !!l.fx.reverse;
+							const w = l.fx.wet || {};
+							it.fx.modules.echo.wet.gain.value = +w.echo || 0;
+							it.fx.modules.reverb.wet.gain.value = +w.reverb || 0;
+							it.fx.modules.chorus.wet.gain.value = +w.chorus || 0;
+							it.fx.modules.flanger.wet.gain.value = +w.flanger || 0;
+							it.fx.modules.phaser.wet.gain.value = +w.phaser || 0;
+							it.fx.modules.comp.wet.gain.value = +w.comp || 0;
+							it.fx.modules.gate.wet.gain.value = +w.gate || 0;
+						}
+
+						// EQ
+						if (l.eqGains && it.eq) {
+							it.eq.bands.forEach((b, i) => {
+								const g = +l.eqGains[i] || 0;
+								b.gainDb = g;
+								b.biquad.gain.value = g;
+							});
+						}
+
+						if (l.solo) soloToSet = it.id;
+					} catch (e) {
+						console.error('Failed to import loop:', e);
+					}
+				}
+
+				// Restore solo state (only one can be active)
+				if (soloToSet) {
+					for (const [, it] of loops) {
+						it.solo = it.id === soloToSet;
+					}
+					updateSoloButtonsUI();
+					updateAllGains();
+				} else {
+					// clear any stuck solos
+					for (const [, it] of loops) {
+						it.solo = false;
+					}
+					updateSoloButtonsUI();
+					updateAllGains();
+				}
+
+				setStatus('Project imported.');
+			}
+			exportBtn.addEventListener('click', exportProject);
+			importBtn.addEventListener('click', () => importInput.click());
+			importInput.addEventListener('change', async (e) => {
+				const f = e.target.files && e.target.files[0];
+				if (!f) return;
+				try {
+					const txt = await f.text();
+					const obj = JSON.parse(txt);
+					await importProjectFromObject(obj);
+				} catch (err) {
+					console.error(err);
+					setStatus('Import failed. Invalid or corrupted project file.');
+				} finally {
+					importInput.value = '';
+				}
 			});
 		</script>
 	</body>
