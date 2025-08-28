@@ -267,6 +267,45 @@
 				text-align: center;
 			}
 
+			/* Recording countdown overlay */
+			.countdown-overlay {
+				position: fixed;
+				inset: 0;
+				background: rgba(0, 0, 0, 0.7);
+				display: none;
+				align-items: center;
+				justify-content: center;
+				z-index: 100;
+				backdrop-filter: blur(2px);
+			}
+			.countdown-overlay.show {
+				display: flex;
+			}
+			.countdown-content {
+				background: linear-gradient(180deg, #1a1e33, #14182a);
+				border: 2px solid #5eead4;
+				border-radius: 20px;
+				padding: 40px 60px;
+				text-align: center;
+				box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+			}
+			.countdown-title {
+				color: #5eead4;
+				font-size: 18px;
+				font-weight: 700;
+				margin-bottom: 20px;
+				text-transform: uppercase;
+				letter-spacing: 1px;
+			}
+			.countdown-number {
+				color: #ff7a7a;
+				font-size: 72px;
+				font-weight: 900;
+				line-height: 1;
+				margin: 10px 0;
+				text-shadow: 0 0 20px rgba(255, 122, 122, 0.3);
+			}
+
 			/* ---------- Modals ---------- */
 			.modalBack {
 				position: fixed;
@@ -476,6 +515,14 @@
 			</div>
 		</div>
 
+		<!-- Recording countdown overlay -->
+		<div id="countdownOverlay" class="countdown-overlay">
+			<div class="countdown-content">
+				<div class="countdown-title">Recording starts in</div>
+				<div id="countdownNumber" class="countdown-number">3</div>
+			</div>
+		</div>
+
 		<!-- FX modal -->
 		<div
 			id="fxBack"
@@ -553,6 +600,10 @@
 				mixChunks = [],
 				mixRecording = false;
 
+			/* Recording countdown */
+			let recordingCountdown = null;
+			let pendingRecordingStart = null;
+
 			/** loop item */
 			const loops = new Map();
 
@@ -567,6 +618,8 @@
 			const samplesEl = document.getElementById('samples');
 			const scopeCanvas = document.getElementById('scope');
 			const scopeCtx = scopeCanvas.getContext('2d');
+			const countdownOverlay = document.getElementById('countdownOverlay');
+			const countdownNumber = document.getElementById('countdownNumber');
 
 			const setStatus = (m) => (statusEl.textContent = m);
 
@@ -737,12 +790,8 @@
 				for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
 					const src = buffer.getChannelData(ch),
 						dst = out.getChannelData(ch);
-					let pos = 0;
-					while (pos < newLen) {
-						const n = Math.min(src.length, newLen - pos);
-						dst.set(src.subarray(0, n), pos);
-						pos += n;
-					}
+					// Copy the original audio only once, rest remains silent (zeros)
+					dst.set(src.subarray(0, Math.min(src.length, newLen)), 0);
 				}
 				return out;
 			}
@@ -764,6 +813,103 @@
 				if (now <= anchor + 0.01) return anchor;
 				const k = Math.ceil((now - anchor) / item.periodSec);
 				return anchor + k * item.periodSec;
+			}
+
+			/* ========= Recording countdown ========= */
+			function getNextMasterLoopStart() {
+				if (!audioCtx || transportStartTime == null || masterLenSec == null) {
+					return null;
+				}
+				const now = audioCtx.currentTime;
+				const elapsed = now - transportStartTime;
+				const cycleProgress = elapsed % masterLenSec;
+				const timeToNext = masterLenSec - cycleProgress;
+				return now + timeToNext;
+			}
+
+			function startRecordingCountdown() {
+				const nextStart = getNextMasterLoopStart();
+				if (!nextStart) {
+					// No master loop yet, start recording immediately
+					startRecordingImmediately();
+					return;
+				}
+
+				const now = audioCtx.currentTime;
+				const delay = nextStart - now;
+
+				// If delay is very short (< 0.1s), wait for the next cycle
+				if (delay < 0.1) {
+					const nextNextStart = nextStart + masterLenSec;
+					pendingRecordingStart = nextNextStart;
+				} else {
+					pendingRecordingStart = nextStart;
+				}
+
+				showCountdownOverlay();
+				updateCountdownDisplay();
+			}
+
+			function showCountdownOverlay() {
+				countdownOverlay.classList.add('show');
+			}
+
+			function hideCountdownOverlay() {
+				countdownOverlay.classList.remove('show');
+			}
+
+			function updateCountdownDisplay() {
+				if (!pendingRecordingStart || !audioCtx) {
+					hideCountdownOverlay();
+					return;
+				}
+
+				const now = audioCtx.currentTime;
+				const remaining = pendingRecordingStart - now;
+
+				if (remaining <= 0) {
+					hideCountdownOverlay();
+					startRecordingImmediately();
+					return;
+				}
+
+				const seconds = Math.ceil(remaining);
+				countdownNumber.textContent = seconds;
+
+				recordingCountdown = setTimeout(updateCountdownDisplay, 50);
+			}
+
+			function cancelRecordingCountdown() {
+				if (recordingCountdown) {
+					clearTimeout(recordingCountdown);
+					recordingCountdown = null;
+				}
+				pendingRecordingStart = null;
+				hideCountdownOverlay();
+			}
+
+			async function startRecordingImmediately() {
+				try {
+					const stream = await getMicStream();
+					ensureAnalyser(stream);
+					startScope();
+					const opts = {},
+						mt = pickMimeType();
+					if (mt) opts.mimeType = mt;
+					mediaRecorder = new MediaRecorder(stream, opts);
+					recordingChunks = [];
+					mediaRecorder.ondataavailable = (e) => {
+						if (e.data && e.data.size > 0) recordingChunks.push(e.data);
+					};
+					mediaRecorder.onstop = handleRecordingStop;
+					mediaRecorder.start();
+					updateRecToggleUI(true);
+					setStatus('Recording… Press again to stop.');
+				} catch (e) {
+					console.error(e);
+					setStatus('Recording is not supported in this browser.');
+					updateRecToggleUI(false);
+				}
 			}
 
 			/* ========= FX / EQ ========= */
@@ -1583,6 +1729,11 @@
 				if (e.key === 'Escape') {
 					closeFx();
 					closeEq();
+					if (pendingRecordingStart) {
+						cancelRecordingCountdown();
+						setStatus('Recording cancelled.');
+						updateRecToggleUI(false);
+					}
 				}
 				if (!isSpace) return;
 				const el = document.activeElement;
@@ -1613,32 +1764,35 @@
 						mediaRecorder.stop();
 						setStatus('Processing…');
 						updateRecToggleUI(false);
+					} else if (pendingRecordingStart) {
+						// Cancel the pending recording
+						cancelRecordingCountdown();
+						setStatus('Recording cancelled.');
+						updateRecToggleUI(false);
 					} else {
 						ensureAudio();
 						await audioCtx.resume();
-						const stream = await getMicStream();
-						ensureAnalyser(stream);
-						startScope();
-						const opts = {},
-							mt = pickMimeType();
-						if (mt) opts.mimeType = mt;
-						mediaRecorder = new MediaRecorder(stream, opts);
-						recordingChunks = [];
-						mediaRecorder.ondataavailable = (e) => {
-							if (e.data && e.data.size > 0) recordingChunks.push(e.data);
-						};
-						mediaRecorder.onstop = handleRecordingStop;
-						mediaRecorder.start();
-						updateRecToggleUI(true);
-						setStatus('Recording… Press again to stop.');
+
+						// Check if we have existing loops to sync to
+						if (masterLenSec != null && transportStartTime != null) {
+							setStatus('Recording will start at next bar...');
+							updateRecToggleUI(true); // Show stop button during countdown
+							startRecordingCountdown();
+						} else {
+							// No master loop yet, start immediately
+							startRecordingImmediately();
+						}
 					}
 				} catch (e) {
 					console.error(e);
 					setStatus('Recording is not supported in this browser.');
+					updateRecToggleUI(false);
+					cancelRecordingCountdown();
 				}
 			});
 			window.addEventListener('beforeunload', () => {
 				if (schedTimer) clearInterval(schedTimer);
+				cancelRecordingCountdown();
 				for (const [, it] of loops) {
 					for (const s of it.active) {
 						try {
@@ -1830,6 +1984,15 @@
 			eqClose.addEventListener('click', closeEq);
 			eqBack.addEventListener('click', (e) => {
 				if (e.target === eqBack) closeEq();
+			});
+
+			/* ========= Countdown overlay click handler ========= */
+			countdownOverlay.addEventListener('click', () => {
+				if (pendingRecordingStart) {
+					cancelRecordingCountdown();
+					setStatus('Recording cancelled.');
+					updateRecToggleUI(false);
+				}
 			});
 
 			/* ========= Export / Import ========= */
