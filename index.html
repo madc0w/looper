@@ -58,6 +58,48 @@
 				gap: 12px;
 				align-items: center;
 			}
+			.mix-timer {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 6px;
+				font-size: 14px;
+				color: var(--text);
+				background: rgba(255, 122, 122, 0.1);
+				border: 1px solid rgba(255, 122, 122, 0.3);
+				border-radius: 8px;
+				padding: 6px 12px;
+				margin-top: 8px;
+				width: fit-content;
+				margin-left: auto;
+				margin-right: auto;
+			}
+			.track-timer {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 6px;
+				font-size: 14px;
+				color: var(--text);
+				background: rgba(255, 122, 122, 0.1);
+				border: 1px solid rgba(255, 122, 122, 0.3);
+				border-radius: 8px;
+				padding: 6px 12px;
+				margin-top: 8px;
+				width: fit-content;
+				margin-left: auto;
+				margin-right: auto;
+			}
+			.timer-label {
+				color: #ff7a7a;
+				font-weight: 700;
+				font-size: 12px;
+			}
+			.timer-value {
+				font-family: 'Courier New', monospace;
+				font-weight: 600;
+				min-width: 60px;
+			}
 			.btn {
 				appearance: none;
 				border: 0;
@@ -88,6 +130,33 @@
 			}
 			.btn.halt {
 				background: linear-gradient(180deg, #9cc2ff, #6aa0ff);
+			}
+			.btn.loading {
+				opacity: 0.7;
+				cursor: not-allowed;
+				position: relative;
+			}
+			.btn.loading::after {
+				content: '';
+				position: absolute;
+				width: 20px;
+				height: 20px;
+				margin: auto;
+				border: 2px solid transparent;
+				border-top-color: #ffffff;
+				border-radius: 50%;
+				animation: spin 1s linear infinite;
+				top: 50%;
+				left: 50%;
+				transform: translate(-50%, -50%);
+			}
+			@keyframes spin {
+				0% {
+					transform: translate(-50%, -50%) rotate(0deg);
+				}
+				100% {
+					transform: translate(-50%, -50%) rotate(360deg);
+				}
 			}
 			.status {
 				margin-top: 10px;
@@ -175,8 +244,8 @@
 			}
 			.row {
 				display: grid;
-				grid-template-columns: minmax(70px, 90px) 1fr;
-				gap: 8px;
+				grid-template-columns: 50px 1fr;
+				gap: 4px;
 				align-items: center;
 			}
 			.row label {
@@ -439,8 +508,21 @@
 				top: 16px;
 				right: 18px;
 				display: flex;
-				gap: 8px;
+				gap: 12px;
 				z-index: 60;
+			}
+			.iconGroup {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				gap: 4px;
+			}
+			.iconLabel {
+				font-size: 10px;
+				color: #9aa0b4;
+				font-weight: 600;
+				text-transform: uppercase;
+				letter-spacing: 0.5px;
 			}
 			.iconBtn {
 				width: 38px;
@@ -467,22 +549,28 @@
 	<body>
 		<!-- compact Export/Import icons -->
 		<div class="iconBar" aria-label="Project actions">
-			<button
-				id="exportBtn"
-				class="iconBtn"
-				title="Export project"
-				aria-label="Export project"
-			>
-				⭳
-			</button>
-			<button
-				id="importBtn"
-				class="iconBtn"
-				title="Import project"
-				aria-label="Import project"
-			>
-				⭱
-			</button>
+			<div class="iconGroup">
+				<button
+					id="exportBtn"
+					class="iconBtn"
+					title="Export project"
+					aria-label="Export project"
+				>
+					⭳
+				</button>
+				<span class="iconLabel">Export</span>
+			</div>
+			<div class="iconGroup">
+				<button
+					id="importBtn"
+					class="iconBtn"
+					title="Import project"
+					aria-label="Import project"
+				>
+					⭱
+				</button>
+				<span class="iconLabel">Import</span>
+			</div>
 			<input
 				id="importInput"
 				type="file"
@@ -504,6 +592,14 @@
 					<button id="mixRecBtn" class="btn record" aria-pressed="false">
 						⏺ Record Mix
 					</button>
+				</div>
+				<div id="mixTimer" class="mix-timer" style="display: none">
+					<span class="timer-label">REC</span>
+					<span id="mixTimerValue" class="timer-value">0:00.0</span>
+				</div>
+				<div id="trackTimer" class="track-timer" style="display: none">
+					<span class="timer-label">REC</span>
+					<span id="trackTimerValue" class="timer-value">0:00.0</span>
 				</div>
 				<div id="status" class="status">Ready.</div>
 				<canvas id="scope" class="scope" aria-hidden="true"></canvas>
@@ -598,7 +694,12 @@
 			let mixDest = null,
 				mixMR = null,
 				mixChunks = [],
-				mixRecording = false;
+				mixRecording = false,
+				mixStartTime = 0,
+				mixTimer = null;
+
+			/* Track recording timer */
+			let trackTimer = null;
 
 			/* Recording countdown */
 			let recordingCountdown = null;
@@ -620,8 +721,66 @@
 			const scopeCtx = scopeCanvas.getContext('2d');
 			const countdownOverlay = document.getElementById('countdownOverlay');
 			const countdownNumber = document.getElementById('countdownNumber');
+			const mixTimerEl = document.getElementById('mixTimer');
+			const mixTimerValue = document.getElementById('mixTimerValue');
+			const trackTimerEl = document.getElementById('trackTimer');
+			const trackTimerValue = document.getElementById('trackTimerValue');
 
 			const setStatus = (m) => (statusEl.textContent = m);
+
+			function updateMixTimer() {
+				if (!mixRecording || !mixStartTime) return;
+				const elapsed = (performance.now() - mixStartTime) / 1000;
+				const minutes = Math.floor(elapsed / 60);
+				const seconds = Math.floor(elapsed % 60);
+				const tenths = Math.floor((elapsed - Math.floor(elapsed)) * 10);
+				mixTimerValue.textContent = `${minutes}:${String(seconds).padStart(
+					2,
+					'0'
+				)}.${tenths}`;
+			}
+
+			function startMixTimer() {
+				mixStartTime = performance.now();
+				mixTimerEl.style.display = 'flex';
+				mixTimer = setInterval(updateMixTimer, 100);
+				updateMixTimer();
+			}
+
+			function stopMixTimer() {
+				if (mixTimer) {
+					clearInterval(mixTimer);
+					mixTimer = null;
+				}
+				mixTimerEl.style.display = 'none';
+				mixStartTime = 0;
+			}
+
+			function updateTrackTimer() {
+				if (!recStartPerf) return;
+				const elapsed = (performance.now() - recStartPerf) / 1000;
+				const minutes = Math.floor(elapsed / 60);
+				const seconds = Math.floor(elapsed % 60);
+				const tenths = Math.floor((elapsed - Math.floor(elapsed)) * 10);
+				trackTimerValue.textContent = `${minutes}:${String(seconds).padStart(
+					2,
+					'0'
+				)}.${tenths}`;
+			}
+
+			function startTrackTimer() {
+				trackTimerEl.style.display = 'flex';
+				trackTimer = setInterval(updateTrackTimer, 100);
+				updateTrackTimer();
+			}
+
+			function stopTrackTimer() {
+				if (trackTimer) {
+					clearInterval(trackTimer);
+					trackTimer = null;
+				}
+				trackTimerEl.style.display = 'none';
+			}
 
 			function ensureAudio() {
 				if (!audioCtx) {
@@ -687,6 +846,7 @@
 				isDrawing = true;
 				scopeCanvas.classList.add('active');
 				scopeCanvas.setAttribute('aria-hidden', 'false');
+				startTrackTimer();
 				drawScope();
 			}
 			function stopScope() {
@@ -700,6 +860,7 @@
 				} catch (_) {}
 				scopeCanvas.classList.remove('active');
 				scopeCanvas.setAttribute('aria-hidden', 'true');
+				stopTrackTimer();
 			}
 			function fmtTime(secs) {
 				secs = Math.max(0, secs || 0);
@@ -1630,16 +1791,24 @@
 				}
 				return '';
 			}
-			function updateMixRecUI(rec) {
-				if (rec) {
-					mixRecBtn.classList.remove('record');
+			function updateMixRecUI(rec, loading = false) {
+				if (loading) {
+					mixRecBtn.classList.remove('record', 'stop');
+					mixRecBtn.classList.add('loading');
+					mixRecBtn.textContent = 'Rendering...';
+					mixRecBtn.disabled = true;
+					mixRecBtn.setAttribute('aria-pressed', 'false');
+				} else if (rec) {
+					mixRecBtn.classList.remove('record', 'loading');
 					mixRecBtn.classList.add('stop');
 					mixRecBtn.textContent = '■ Stop Mix';
+					mixRecBtn.disabled = false;
 					mixRecBtn.setAttribute('aria-pressed', 'true');
 				} else {
-					mixRecBtn.classList.remove('stop');
+					mixRecBtn.classList.remove('stop', 'loading');
 					mixRecBtn.classList.add('record');
 					mixRecBtn.textContent = '⏺ Record Mix';
+					mixRecBtn.disabled = false;
 					mixRecBtn.setAttribute('aria-pressed', 'false');
 				}
 			}
@@ -1658,6 +1827,10 @@
 						if (e.data && e.data.size > 0) mixChunks.push(e.data);
 					};
 					mixMR.onstop = async () => {
+						stopMixTimer();
+						updateMixRecUI(false, true); // Show loading state
+						setStatus('Rendering WAV file...');
+
 						try {
 							const blob = new Blob(mixChunks, {
 								type: mixMR.mimeType || 'audio/webm',
@@ -1682,7 +1855,7 @@
 							console.error(err);
 							setStatus('Failed to build WAV from mix.');
 						} finally {
-							updateMixRecUI(false);
+							updateMixRecUI(false, false); // Remove loading state
 							mixRecording = false;
 							updateHaltButtonUI();
 						}
@@ -1690,12 +1863,14 @@
 					mixMR.start();
 					updateMixRecUI(true);
 					mixRecording = true;
+					startMixTimer();
 					setStatus('Recording mix… Press again to stop (WAV auto-downloads).');
 				} catch (e) {
 					console.error(e);
 					setStatus('Could not start mix recording in this browser.');
 					updateMixRecUI(false);
 					mixRecording = false;
+					stopMixTimer();
 				}
 			}
 			async function stopMixRecording() {
@@ -1706,6 +1881,7 @@
 				}
 			}
 			function toggleMixRecording() {
+				if (mixRecBtn.disabled) return; // Prevent clicks during loading
 				if (!mixRecording) startMixRecording();
 				else stopMixRecording();
 			}
@@ -1793,6 +1969,8 @@
 			window.addEventListener('beforeunload', () => {
 				if (schedTimer) clearInterval(schedTimer);
 				cancelRecordingCountdown();
+				stopMixTimer();
+				stopTrackTimer();
 				for (const [, it] of loops) {
 					for (const s of it.active) {
 						try {
