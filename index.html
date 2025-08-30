@@ -54,7 +54,7 @@
 			}
 			.controls {
 				display: grid;
-				grid-template-columns: repeat(3, minmax(260px, 1fr));
+				grid-template-columns: repeat(4, minmax(200px, 1fr));
 				gap: 12px;
 				align-items: center;
 			}
@@ -124,6 +124,10 @@
 			.btn.record {
 				background: linear-gradient(180deg, #ff7a7a, #ff4747);
 				color: #200;
+			}
+			.btn.upload {
+				background: linear-gradient(180deg, #7af3ff, #47d4ff);
+				color: #002020;
 			}
 			.btn.stop {
 				background: linear-gradient(180deg, #7af7d6, #3be7c3);
@@ -309,7 +313,12 @@
 
 			@media (max-width: 700px) {
 				.controls {
-					grid-template-columns: 1fr;
+					grid-template-columns: 1fr 1fr;
+					gap: 8px;
+				}
+				.controls button {
+					font-size: 14px;
+					padding: 12px 14px;
 				}
 				.sample {
 					grid-template-columns: 1fr 1fr 42px 42px 42px 42px 42px 42px;
@@ -586,6 +595,9 @@
 					<button id="recToggleBtn" class="btn record" aria-pressed="false">
 						● Record
 					</button>
+					<button id="uploadBtn" class="btn upload" aria-pressed="false">
+						📁 Upload Track
+					</button>
 					<button id="haltBtn" class="btn halt" disabled>
 						⏹ Stop Playback
 					</button>
@@ -593,6 +605,12 @@
 						⏺ Record Mix
 					</button>
 				</div>
+				<input
+					id="uploadInput"
+					type="file"
+					accept="audio/mp3,audio/wav,audio/mpeg,audio/x-wav"
+					style="display: none"
+				/>
 				<div id="mixTimer" class="mix-timer" style="display: none">
 					<span class="timer-label">REC</span>
 					<span id="mixTimerValue" class="timer-value">0:00.0</span>
@@ -710,6 +728,8 @@
 
 			/* ========= DOM ========= */
 			const recToggleBtn = document.getElementById('recToggleBtn');
+			const uploadBtn = document.getElementById('uploadBtn');
+			const uploadInput = document.getElementById('uploadInput');
 			const haltBtn = document.getElementById('haltBtn');
 			const mixRecBtn = document.getElementById('mixRecBtn');
 			const exportBtn = document.getElementById('exportBtn');
@@ -2342,6 +2362,56 @@
 					setStatus('Import failed. Invalid or corrupted project file.');
 				} finally {
 					importInput.value = '';
+				}
+			});
+
+			/* ========= Upload Track ========= */
+			uploadBtn.addEventListener('click', () => {
+				uploadInput.click();
+			});
+
+			uploadInput.addEventListener('change', async (e) => {
+				const file = e.target.files && e.target.files[0];
+				if (!file) return;
+
+				try {
+					setStatus('Loading audio file...');
+
+					// Check file type
+					const validTypes = [
+						'audio/mp3',
+						'audio/mpeg',
+						'audio/wav',
+						'audio/wave',
+						'audio/x-wav',
+					];
+					const isValidType =
+						validTypes.includes(file.type) ||
+						file.name.toLowerCase().endsWith('.mp3') ||
+						file.name.toLowerCase().endsWith('.wav');
+
+					if (!isValidType) {
+						setStatus('Please select an MP3 or WAV file.');
+						return;
+					}
+
+					// Read file as array buffer
+					const arrayBuffer = await file.arrayBuffer();
+
+					// Decode audio data
+					ensureAudio();
+					const audioBuffer = await decodeSafely(arrayBuffer);
+
+					// Add to looper
+					await addLoop(audioBuffer);
+
+					setStatus(`Track "${file.name}" uploaded successfully!`);
+				} catch (err) {
+					console.error('Upload failed:', err);
+					setStatus('Failed to load audio file. Please try a different file.');
+				} finally {
+					// Clear the input so the same file can be selected again if needed
+					uploadInput.value = '';
 				}
 			});
 		</script>
